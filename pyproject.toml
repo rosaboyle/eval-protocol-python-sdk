@@ -130,6 +130,9 @@ supabase = [
 chinook = [
     "psycopg2-binary>=2.9.10",
 ]
+langchain = [
+    "langchain-core>=0.3.0",
+]
 
 [tool.pytest.ini_options]
 addopts = "-q"
