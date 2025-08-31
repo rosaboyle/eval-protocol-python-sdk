@@ -82,8 +82,7 @@ def reward_function(
 
         if not has_var_keyword:
             raise ValueError(
-                f"Function '{func.__name__}' must accept **kwargs parameter. "
-                f"Please add '**kwargs' to the function signature."
+                f"Function '{func.__name__}' must accept **kwargs parameter. Please add '**kwargs' to the function signature."
             )
 
         # Setup resources once when the decorator is applied
@@ -113,7 +112,7 @@ def reward_function(
                     inner = non_none[0]
                     inner_origin = get_origin(inner)
                     inner_args = get_args(inner)
-                    return inner_origin in (list, List) and inner_args and inner_args[0] == Message
+                    return (inner_origin in (list, List)) and bool(inner_args) and (inner_args[0] == Message)
             return False
 
         def _prepare_final_args(*args: Any, **kwargs: Any):
