@@ -99,6 +99,23 @@ def reward_function(
         # Detect if the user supplied function is a coroutine (async def)
         _is_async_function = inspect.iscoroutinefunction(func)
 
+        def _is_list_of_message_annotation(annotation: Any) -> bool:
+            origin = get_origin(annotation)
+            args = get_args(annotation)
+            # Direct List[Message]
+            if origin in (list, List) and args and args[0] == Message:
+                return True
+            # Optional[List[Message]] or Union[List[Message], None]
+            if origin is Union and args:
+                # Filter out NoneType
+                non_none = [a for a in args if a is not type(None)]  # noqa: E721
+                if len(non_none) == 1:
+                    inner = non_none[0]
+                    inner_origin = get_origin(inner)
+                    inner_args = get_args(inner)
+                    return inner_origin in (list, List) and inner_args and inner_args[0] == Message
+            return False
+
         def _prepare_final_args(*args: Any, **kwargs: Any):
             """Prepare final positional and keyword arguments for the user function call.
             This includes Pydantic coercion and resource injection. Returns a tuple of
@@ -119,7 +136,7 @@ def reward_function(
                     if isinstance(item_data, Message):
                         typed_list.append(item_data)
                     elif isinstance(item_data, dict):
-                        typed_list.append(Message(**item_data))
+                        typed_list.append(Message.model_validate(item_data))
                     else:
                         raise TypeError(f"Unexpected type for item {i} in '{arg_name_for_error}': {type(item_data)}")
                 return typed_list
@@ -127,11 +144,7 @@ def reward_function(
             # 1. Conditional Pydantic conversion for 'messages' (pointwise) or 'rollouts_messages' (batch)
             if mode == "pointwise" and "messages" in params and "messages" in final_func_args:
                 messages_param_annotation = params["messages"].annotation
-                if (
-                    get_origin(messages_param_annotation) in (list, List)
-                    and get_args(messages_param_annotation)
-                    and get_args(messages_param_annotation)[0] == Message
-                ):
+                if _is_list_of_message_annotation(messages_param_annotation):
                     try:
                         final_func_args["messages"] = _coerce_to_list_message(final_func_args["messages"], "messages")
                     except Exception as err:
@@ -155,12 +168,18 @@ def reward_function(
             # Ground truth coercion (if needed)
             if "ground_truth" in params and "ground_truth" in final_func_args:
                 gt_ann = params["ground_truth"].annotation
-                if get_origin(gt_ann) in (list, List) and get_args(gt_ann) and get_args(gt_ann)[0] == Message:
+                if _is_list_of_message_annotation(gt_ann):
                     if final_func_args["ground_truth"] is not None:
+                        gt_val = final_func_args["ground_truth"]
                         try:
-                            final_func_args["ground_truth"] = _coerce_to_list_message(
-                                final_func_args["ground_truth"], "ground_truth"
-                            )
+                            if isinstance(gt_val, list):
+                                final_func_args["ground_truth"] = _coerce_to_list_message(gt_val, "ground_truth")
+                            elif isinstance(gt_val, dict):
+                                final_func_args["ground_truth"] = _coerce_to_list_message([gt_val], "ground_truth")
+                            elif isinstance(gt_val, str):
+                                final_func_args["ground_truth"] = _coerce_to_list_message(
+                                    [{"role": "system", "content": gt_val}], "ground_truth"
+                                )
                         except Exception as err:
                             raise ValueError(
                                 f"Input 'ground_truth' failed Pydantic validation for List[Message]: {err}"

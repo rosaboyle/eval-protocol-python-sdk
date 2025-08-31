@@ -243,8 +243,19 @@ class Message(BaseModel):
 
     @classmethod
     def model_validate(cls, obj, *args, **kwargs):
-        if isinstance(obj, dict) and "role" not in obj:
-            raise ValueError("Role is required")
+        if isinstance(obj, dict):
+            if "role" not in obj:
+                raise ValueError("Role is required")
+            # Be lenient: if tool_calls entries are missing required 'id', synthesize one
+            tool_calls_obj = obj.get("tool_calls")
+            if isinstance(tool_calls_obj, list):
+                fixed_tool_calls = []
+                for tc in tool_calls_obj:
+                    if isinstance(tc, dict):
+                        if not tc.get("id"):
+                            tc = {**tc, "id": generate_id()}
+                    fixed_tool_calls.append(tc)
+                obj = {**obj, "tool_calls": fixed_tool_calls}
         return super().model_validate(obj, *args, **kwargs)
 
 
@@ -611,27 +622,35 @@ class EvaluationRow(BaseModel):
     def get_total_reward(self) -> float:
         """Get total reward from control_plane_step data."""
         messages_with_control_plane = [msg for msg in self.messages if msg.control_plane_step]
-        return (
-            sum(msg.control_plane_step["reward"] for msg in messages_with_control_plane)
-            if messages_with_control_plane
-            else 0.0
-        )
+        if not messages_with_control_plane:
+            return 0.0
+        total = 0.0
+        for msg in messages_with_control_plane:
+            step = msg.control_plane_step or {}
+            try:
+                total += float(step.get("reward", 0.0))
+            except (TypeError, ValueError):
+                continue
+        return total
 
     def get_terminated(self) -> bool:
         """Get termination status from control_plane_step data."""
         messages_with_control_plane = [msg for msg in self.messages if msg.control_plane_step]
-        return (
-            any(msg.control_plane_step["terminated"] for msg in messages_with_control_plane)
-            if messages_with_control_plane
-            else False
-        )
+        if not messages_with_control_plane:
+            return False
+        for msg in messages_with_control_plane:
+            step = msg.control_plane_step or {}
+            if bool(step.get("terminated", False)):
+                return True
+        return False
 
     def get_termination_reason(self) -> str:
         """Get termination reason from the final control_plane_step data."""
         # Find the last message with control_plane_step that has termination_reason
         for msg in reversed(self.messages):
             if msg.control_plane_step and msg.control_plane_step.get("termination_reason"):
-                return msg.control_plane_step["termination_reason"]
+                reason = msg.control_plane_step.get("termination_reason")
+                return str(reason)
         return "unknown"
 
     def __hash__(self) -> int:
