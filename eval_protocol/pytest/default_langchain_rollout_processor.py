@@ -35,15 +35,20 @@ class LangGraphRolloutProcessor(RolloutProcessor):
                 from langchain_core.messages import HumanMessage
             except Exception:
                 # Fallback minimal message if langchain_core is unavailable
-                class HumanMessage:  # type: ignore
+                class HumanMessage(BaseMessage):  # type: ignore
                     def __init__(self, content: str):
                         self.content = content
+                        self.type = "human"
 
             lm_messages: List[BaseMessage] = []
             if row.messages:
                 last_user = [m for m in row.messages if m.role == "user"]
                 if last_user:
-                    lm_messages.append(HumanMessage(content=last_user[-1].content or ""))
+                    content = last_user[-1].content or ""
+                    if isinstance(content, list):
+                        # Flatten our SDK content parts into a single string for LangChain
+                        content = "".join([getattr(p, "text", str(p)) for p in content])
+                    lm_messages.append(HumanMessage(content=str(content)))
             if not lm_messages:
                 lm_messages = [HumanMessage(content="")]  # minimal
 
@@ -63,8 +68,12 @@ class LangGraphRolloutProcessor(RolloutProcessor):
             else:
                 raise TypeError("Unsupported invoke target for LangGraphRolloutProcessor")
 
-            result = await invoke_fn({"messages": lm_messages})
-            result_messages: List[BaseMessage] = result.get("messages", [])
+            result_obj = await invoke_fn({"messages": lm_messages})
+            # Accept both dicts and objects with .get/.messages
+            if isinstance(result_obj, dict):
+                result_messages: List[BaseMessage] = result_obj.get("messages", [])
+            else:
+                result_messages = getattr(result_obj, "messages", [])
 
             def _serialize_message(msg: BaseMessage) -> Message:
                 # Prefer SDK-level serializer
