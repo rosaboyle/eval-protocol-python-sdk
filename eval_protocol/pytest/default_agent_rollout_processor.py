@@ -6,7 +6,7 @@ from typing import Any, AsyncIterator, List, Optional, Union, Dict
 
 from mcp.types import CallToolResult, TextContent
 from openai import NOT_GIVEN, NotGiven
-from openai.types.chat import ChatCompletionContentPartTextParam, ChatCompletionMessage, ChatCompletionToolParam
+from openai.types.chat import ChatCompletionContentPartTextParam
 from openai.types.chat.chat_completion_message_param import ChatCompletionMessageParam
 
 from eval_protocol.dataset_logger.dataset_logger import DatasetLogger
@@ -15,6 +15,14 @@ from eval_protocol.mcp.mcp_multi_client import MCPMultiClient
 from eval_protocol.models import EvaluationRow, Message
 from eval_protocol.pytest.rollout_processor import RolloutProcessor
 from eval_protocol.pytest.types import Dataset, RolloutProcessorConfig
+from pydantic import BaseModel
+from typing import Optional
+
+
+class FunctionLike(BaseModel):
+    name: Optional[str] = None
+    parameters: Any = None
+
 
 logger = logging.getLogger(__name__)
 
@@ -41,13 +49,25 @@ class Agent:
                 raw_tools = await self.mcp_client.get_available_tools()
                 tools_dicts: List[dict[str, Any]] = []
                 for t in raw_tools or []:
+                    # Normalize any tool to dict shape expected by tests
+                    tool_type = getattr(t, "type", None)
+                    func = getattr(t, "function", None)
                     if isinstance(t, dict):
-                        # Already a dict-like structure
+                        # Ensure function is dict-like; if it has .name/.parameters convert
+                        f = t.get("function")
+                        if f is not None and not isinstance(f, dict):
+                            f_name = getattr(f, "name", None)
+                            f_params = getattr(f, "parameters", None)
+                            if hasattr(f_params, "model_dump"):
+                                f_params = f_params.model_dump()
+                            func_obj = FunctionLike(name=f_name, parameters=f_params)
+                            t = {"type": t.get("type", "function"), "function": func_obj}
+                        elif isinstance(f, dict):
+                            func_obj = FunctionLike(name=f.get("name"), parameters=f.get("parameters"))
+                            t = {"type": t.get("type", "function"), "function": func_obj}
                         tools_dicts.append(t)
                         continue
-                    # Fallback: extract attributes from OpenAI types
-                    tool_type = getattr(t, "type", "function")
-                    func = getattr(t, "function", None)
+                    # Construct a dict from object-like tool
                     name = getattr(func, "name", None)
                     params = getattr(func, "parameters", None)
                     if hasattr(params, "model_dump"):
@@ -56,7 +76,8 @@ class Agent:
                         params_payload = params
                     else:
                         params_payload = {}
-                    tools_dicts.append({"type": tool_type, "function": {"name": name, "parameters": params_payload}})
+                    func_obj = FunctionLike(name=name, parameters=params_payload)
+                    tools_dicts.append({"type": tool_type or "function", "function": func_obj})
                 self.evaluation_row.tools = tools_dicts
             else:
                 self.evaluation_row.tools = None
@@ -166,13 +187,16 @@ class Agent:
         """
         assert self.mcp_client is not None, "MCP client is not initialized"
         tool_result = await self.mcp_client.call_tool(tool_name, tool_args_dict)
-        content = self._get_content_from_tool_result(tool_result)
+        # Accept string errors from client and normalize to text content
+        content = self._get_content_from_tool_result(tool_result)  # type: ignore[arg-type]
         return tool_call_id, content
 
-    def _get_content_from_tool_result(self, tool_result: CallToolResult) -> List[TextContent]:
+    def _get_content_from_tool_result(self, tool_result: CallToolResult | str) -> List[TextContent]:
         if getattr(tool_result, "structuredContent", None):
             return [TextContent(text=json.dumps(tool_result.structuredContent), type="text")]
         normalized: List[TextContent] = []
+        if isinstance(tool_result, str):
+            return [TextContent(text=tool_result, type="text")]
         for content in getattr(tool_result, "content", []) or []:
             if isinstance(content, TextContent):
                 normalized.append(content)
