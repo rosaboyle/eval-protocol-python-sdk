@@ -12,6 +12,7 @@ import eval_protocol as ep
 from eval_protocol.models import EvaluationRow
 from eval_protocol.pytest.rollout_processor import RolloutProcessor
 from eval_protocol.pytest.types import RolloutProcessorConfig
+from eval_protocol.mcp.execution.manager import ExecutionManager
 
 
 class MCPServerManager:
@@ -250,22 +251,16 @@ class MCPGymRolloutProcessor(RolloutProcessor):
             model_id=self.policy.model_id,
         )
 
-        # Get rollout tasks from ep.rollout
-        async def _run_rollout_and_wrap(row_index: int) -> EvaluationRow:
-            # ep.rollout now returns concrete results
-            assert self.policy is not None, "Policy must be initialized before rollout"
-            results = await ep.rollout(
-                envs,
-                policy=self.policy,
-                evaluation_rows=rows,
-                steps=config.steps,
-                max_concurrent_rollouts=config.max_concurrent_rollouts,
-            )
-            return results[row_index]
+        # TODO: chat with benny/dylan about when they're back. can we just bypass ep.rollout()? i don't really see the point of it anymore. or turn it into a return list of tasks.
+        execution_manager = ExecutionManager()
+        tasks = execution_manager.execute_rollouts(
+            envs,
+            policy=self.policy,
+            steps=config.steps,
+            max_concurrent_rollouts=config.max_concurrent_rollouts,
+            evaluation_rows=rows,
+        )
 
-        tasks: List[asyncio.Task[EvaluationRow]] = [
-            asyncio.create_task(_run_rollout_and_wrap(i)) for i in range(len(rows))
-        ]
         return tasks
 
     def cleanup(self) -> None:
