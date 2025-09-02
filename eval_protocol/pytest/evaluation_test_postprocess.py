@@ -4,6 +4,7 @@ import math
 import os
 import pathlib
 import statistics
+import sys
 import time
 from eval_protocol.dataset_logger.dataset_logger import DatasetLogger
 from eval_protocol.models import CompletionParams, EvaluationRow, EvaluationThreshold
@@ -123,11 +124,13 @@ def postprocess(
         if should_print:
             if ci_low is not None and ci_high is not None and standard_error is not None:
                 print(
-                    f"EP Summary | suite={suite_name} model={model_used} agg={summary_obj['agg_score']:.3f} se={summary_obj['standard_error']:.3f} ci95=[{ci_low:.3f},{ci_high:.3f}] runs={num_runs} rows={total_rows}"
+                    f"EP Summary | suite={suite_name} model={model_used} agg={summary_obj['agg_score']:.3f} se={summary_obj['standard_error']:.3f} ci95=[{ci_low:.3f},{ci_high:.3f}] runs={num_runs} rows={total_rows}",
+                    file=sys.__stderr__,
                 )
             else:
                 print(
-                    f"EP Summary | suite={suite_name} model={model_used} agg={summary_obj['agg_score']:.3f} runs={num_runs} rows={total_rows}"
+                    f"EP Summary | suite={suite_name} model={model_used} agg={summary_obj['agg_score']:.3f} runs={num_runs} rows={total_rows}",
+                    file=sys.__stderr__,
                 )
             # As per project convention, avoid printing per-metric CI lines to reduce noise
         if summary_path:
