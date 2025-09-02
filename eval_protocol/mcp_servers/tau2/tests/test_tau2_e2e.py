@@ -747,15 +747,28 @@ def tau2_airline_eval(
         elif role == "user":
             trajectory_objects.append(UserMessage(role=role, content=content))
         elif role == "tool":
-            tool_id = msg.tool_call_id
+            tool_id = msg.tool_call_id or ""
             trajectory_objects.append(ToolMessage(id=tool_id, role=role, content=content, requestor="assistant"))
 
     reward = 1.0
 
+    # Convert incoming action dicts to typed Action objects for the evaluator
+    action_objs: Optional[List[Action]] = None
+    if actions is not None:
+        action_objs = []
+        for a in actions:
+            if isinstance(a, Action):
+                action_objs.append(a)
+            elif isinstance(a, dict):
+                action_objs.append(Action(**a))
+            else:
+                raise TypeError("actions must be a list of Action or dict items")
+
     evaluation_criteria = EvaluationCriteria(
         nl_assertions=nl_assertions,
         communicate_info=communicate_info,
-        actions=actions,
+        actions=action_objs,
+        env_assertions=None,
         reward_basis=[
             RewardType.NL_ASSERTION,
             RewardType.DB,
@@ -796,7 +809,8 @@ def tau2_airline_eval(
     action_bases = {RewardType.ACTION}
     nl_bases = {RewardType.NL_ASSERTION}
     comm_bases = {RewardType.COMMUNICATE}
-    task_reward_basis = set(task.evaluation_criteria.reward_basis)
+    # task.evaluation_criteria can be Optional in the type hints; guard for None
+    task_reward_basis = set(task.evaluation_criteria.reward_basis) if task.evaluation_criteria else set()
 
     reward_breakdown = {}
     if task_reward_basis & env_bases:
