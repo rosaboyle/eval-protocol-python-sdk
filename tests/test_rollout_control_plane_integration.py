@@ -13,6 +13,7 @@ This validates the complete implementation of the control plane separation
 feature in the rollout execution pipeline.
 """
 
+import asyncio
 import json
 import sys
 import tempfile
@@ -238,7 +239,8 @@ class TestRolloutControlPlaneIntegration:
             policy = MockPolicy(["right", "down", "right"])
 
             # Execute rollout
-            tasks = self.execution_manager.execute_rollouts(mock_env, policy, steps=10)
+            semaphore = asyncio.Semaphore(1)  # Create semaphore for test
+            tasks = self.execution_manager.execute_rollouts(mock_env, policy, semaphore, steps=10)
             evaluation_rows = []
             for task in tasks:
                 row = await task
@@ -459,7 +461,8 @@ class TestRolloutControlPlaneIntegration:
 
             # Execute rollout with control plane failure
             policy = MockPolicy(["right"])
-            tasks = self.execution_manager.execute_rollouts(mock_env, policy, steps=1)
+            semaphore = asyncio.Semaphore(1)  # Create semaphore for test
+            tasks = self.execution_manager.execute_rollouts(mock_env, policy, semaphore, steps=1)
             evaluation_rows = []
             for task in tasks:
                 row = await task
@@ -515,7 +518,6 @@ class TestRolloutControlPlaneIntegration:
 
             def mock_execute_rollouts(*args, **kwargs):
                 call_args.append((args, kwargs))
-                import asyncio
 
                 return [asyncio.create_task(mock_task())]
 
@@ -541,9 +543,11 @@ class TestRolloutControlPlaneIntegration:
             # Verify execute_rollouts was called with correct arguments
             assert len(call_args) == 1, "execute_rollouts should be called once"
             args, kwargs = call_args[0]
+
             assert args[0] == mock_make.return_value, "First arg should be mock env"
             assert args[1] == policy, "Second arg should be policy"
-            assert args[2] == 5, "Third arg should be steps"
+            assert isinstance(kwargs.get("semaphore"), asyncio.Semaphore), "semaphore should be in kwargs"
+            assert kwargs.get("steps") == 5, "steps should be in kwargs"
 
             assert result == ["ok"]
 
