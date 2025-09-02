@@ -283,9 +283,9 @@ def pytest_sessionfinish(session, exitstatus):
     """Print all collected Fireworks experiment links from pytest stash."""
     try:
         # Late import to avoid circulars; if missing key, skip printing
-        EXPERIMENT_LINKS_STASH_KEY: StashKey[list[dict]] | None = None
+        EXPERIMENT_LINKS_STASH_KEY = None
         try:
-            from .evaluation_test import EXPERIMENT_LINKS_STASH_KEY as _KEY  # type: ignore
+            from .store_experiment_link import EXPERIMENT_LINKS_STASH_KEY as _KEY  # type: ignore
 
             EXPERIMENT_LINKS_STASH_KEY = _KEY
         except Exception:
