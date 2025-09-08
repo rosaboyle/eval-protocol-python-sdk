@@ -40,7 +40,6 @@ def agent_factory(config: RolloutProcessorConfig) -> Agent:
         },
     ],
     rollout_processor=PydanticAgentRolloutProcessor(agent_factory),
-    mode="pointwise",
 )
 async def test_pydantic_complex_queries(row: EvaluationRow) -> EvaluationRow:
     """
