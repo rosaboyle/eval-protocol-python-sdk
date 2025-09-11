@@ -100,6 +100,7 @@ class LangfuseAdapter:
 
         for trace in traces.data:
             try:
+                trace: TraceWithFullDetails = self.client.api.trace.get(trace.id)
                 eval_row = self._convert_trace_to_evaluation_row(trace, include_tool_calls)
                 if eval_row:
                     eval_rows.append(eval_row)
@@ -135,7 +136,7 @@ class LangfuseAdapter:
         return eval_rows
 
     def _convert_trace_to_evaluation_row(
-        self, trace: Trace, include_tool_calls: bool = True
+        self, trace: TraceWithFullDetails, include_tool_calls: bool = True
     ) -> Optional[EvaluationRow]:
         """Convert a Langfuse trace to EvaluationRow format.
 
@@ -147,8 +148,6 @@ class LangfuseAdapter:
             EvaluationRow or None if conversion fails
         """
         try:
-            trace = self.client.api.trace.get("2d9f3474-83ab-4431-9788-049ca4219023")
-
             # Extract messages from trace input and output
             messages = self._extract_messages_from_trace(trace, include_tool_calls)
 
@@ -163,13 +162,20 @@ class LangfuseAdapter:
             return EvaluationRow(
                 messages=messages,
                 tools=tools,
+                input_metadata=InputMetadata(
+                    session_data={
+                        "langfuse_trace_id": trace.id,  # Store the trace ID here
+                    }
+                ),
             )
 
         except (AttributeError, ValueError, KeyError) as e:
             logger.error("Error converting trace %s: %s", trace.id, e)
             return None
 
-    def _extract_messages_from_trace(self, trace: Any, include_tool_calls: bool = True) -> List[Message]:
+    def _extract_messages_from_trace(
+        self, trace: TraceWithFullDetails, include_tool_calls: bool = True
+    ) -> List[Message]:
         """Extract messages from Langfuse trace input and output.
 
         Args:

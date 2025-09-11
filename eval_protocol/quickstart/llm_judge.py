@@ -19,6 +19,7 @@ from eval_protocol.adapters.langfuse import create_langfuse_adapter
 import concurrent.futures
 from concurrent.futures import ThreadPoolExecutor
 
+# Judge configs from the original Arena-Hard-Auto paper, feel free to add your own judge!
 JUDGE_CONFIGS = {
     "gpt-4.1": {
         "model": "gpt-4.1",
@@ -67,11 +68,13 @@ def fetch_langfuse_traces_as_evaluation_rows(
 @evaluation_test(
     input_rows=[fetch_langfuse_traces_as_evaluation_rows()],
     completion_params=[
-        {"model": "gpt-5"},
         {
-            # "max_tokens": 131000,
-            # "extra_body": {"reasoning_effort": "low"},
             "model": "fireworks_ai/accounts/fireworks/models/qwen3-235b-a22b-instruct-2507",
+        },
+        {
+            "max_tokens": 131000,
+            "extra_body": {"reasoning_effort": "low"},
+            "model": "fireworks_ai/accounts/fireworks/models/gpt-oss-120b",
         },
     ],
     rollout_processor=SingleTurnRolloutProcessor(),
@@ -217,5 +220,24 @@ async def test_llm_judge(rows: list[EvaluationRow]) -> list[EvaluationRow]:
             row.evaluation_result.standard_error = (upper_score - lower_score) / (
                 2 * 1.645
             )  # Standard error approximation from 90% CI
+
+    # Optional, push scores back to Langfuse. Note that one score per model will be pushed back onto same trace.
+    try:
+        langfuse = create_langfuse_adapter().client
+    except Exception:
+        langfuse = None
+
+    if langfuse:
+        for trace_id in set(
+            row.input_metadata.session_data["langfuse_trace_id"]
+            for row in rows
+            if row.evaluation_result and row.input_metadata and row.input_metadata.session_data
+        ):
+            if trace_id:
+                langfuse.create_score(
+                    trace_id=trace_id,
+                    name=model_name,
+                    value=mean_score,
+                )
 
     return rows
