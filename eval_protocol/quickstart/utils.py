@@ -2,9 +2,12 @@
 Arena-Hard-Auto utility functions adapted for Eval Protocol.
 """
 
+import os
 import re
+from typing import List, Dict, Any, Optional
+import pandas as pd
 
-from eval_protocol.models import EvaluationRow, Message
+from eval_protocol.models import EvaluationRow, Message, EvaluateResult, MetricResult
 
 
 OG_ARENA_HARD_PROMPT = """Please act as an impartial judge and evaluate the quality of the responses provided by two AI assistants to the user prompt displayed below. You will be given assistant A's answer and assistant B's answer. Your job is to evaluate which assistant's answer is better.
@@ -26,6 +29,39 @@ After providing your explanation, you must output only one of the following choi
 5. Assistant B is significantly better: [[B>>A]]
 
 Example output: "My final verdict is tie: [[A=B]]"."""
+
+
+# Judge configurations, feel free to add your own!
+JUDGE_CONFIGS = {
+    "gpt-4.1": {
+        "model": "gpt-4.1",
+        "temperature": 0.0,
+        "max_tokens": 16000,
+        "max_concurrency": 64,
+    },
+    "gemini-2.5-pro": {
+        "model": "gemini-2.5-pro",
+        "temperature": 1.0,
+        "max_tokens": 32000,
+        "api_key": os.getenv("GEMINI_API_KEY"),
+        "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
+        "max_concurrency": 32,
+    },
+}
+
+# Label to score mapping for Arena-Hard-Auto judgments
+LABEL_TO_SCORE = {
+    "A>B": [1],
+    "A>>B": [1] * 3,
+    "A=B": [0.5],
+    "A<<B": [0] * 3,
+    "A<B": [0],
+    "B>A": [0],
+    "B>>A": [0] * 3,
+    "B=A": [0.5],
+    "B<<A": [1] * 3,
+    "B<A": [1],
+}
 
 
 def get_score(judgment, patterns):
@@ -154,3 +190,145 @@ def pairwise_judgment(question_text, answer_a, answer_b, tools, judge_config):
         "prompt": messages,
     }
     return result
+
+
+def fetch_langfuse_traces_as_evaluation_rows(
+    limit: int = 100,
+    tags: Optional[List[str]] = None,
+    user_id: Optional[str] = None,
+    session_id: Optional[str] = None,
+    hours_back: Optional[int] = None,
+    include_tool_calls: bool = True,
+) -> List[EvaluationRow]:
+    """Fetch Langfuse traces as evaluation rows."""
+    try:
+        from eval_protocol.adapters.langfuse import create_langfuse_adapter
+
+        adapter = create_langfuse_adapter()
+        return adapter.get_evaluation_rows(
+            limit=limit,
+            tags=tags,
+            user_id=user_id,
+            session_id=session_id,
+            hours_back=hours_back,
+            include_tool_calls=include_tool_calls,
+        )
+    except Exception as e:
+        print(f"❌ LangfuseAdapter failed: {e}")
+        return []
+
+
+def calculate_bootstrap_scores(judgments: List[Dict[str, Any]]) -> tuple[float, float, float]:
+    """
+    Calculate bootstrap scores from judgments.
+
+    Returns:
+        tuple: (mean_score, lower_score, upper_score)
+    """
+    # Extract scores from judgments
+    scores_data = []
+    for judgment in judgments:
+        game1, game2 = judgment["games"]
+        if game1 and game2 and game1.get("score") and game2.get("score"):
+            # Convert judgment scores to numerical scores
+            scores = LABEL_TO_SCORE[game2["score"]] + [1 - s for s in LABEL_TO_SCORE[game1["score"]]]
+            for score in scores:
+                scores_data.append(score)
+
+    if not scores_data:
+        return 0.0, 0.0, 0.0
+
+    # Create DataFrame (single column of scores)
+    battles = pd.DataFrame({"score": scores_data})
+
+    # Bootstrap sampling for calculating relative performance to original model at fixed 50%
+    bootstrap_means = [battles.sample(frac=1.0, replace=True)["score"].mean() for _ in range(100)]
+
+    # Calculate final scores
+    bootstraps = pd.Series(bootstrap_means)
+    mean_score = bootstraps.mean()
+    lower_score = bootstraps.quantile(0.05)
+    upper_score = bootstraps.quantile(0.95)
+
+    return mean_score, lower_score, upper_score
+
+
+def run_judgment(row: EvaluationRow, model_name: str, judge_name: str) -> Optional[Dict[str, Any]]:
+    """
+    Run pairwise judgment for a single evaluation row.
+
+    Args:
+        row: EvaluationRow to judge
+        model_name: Name of the model being evaluated
+        judge_name: Name of the judge config to use
+
+    Returns:
+        Dict containing model name and games results, or None if failed
+    """
+    if not row.messages:
+        return None
+
+    question_text = "\n".join([serialize_message(msg) for msg in row.messages[:-1]])
+    model_a_answer = row.ground_truth
+    model_b_answer = serialize_message(row.messages[-1])
+
+    games = []
+
+    # Round 1: A vs B (original vs comparison)
+    result1 = pairwise_judgment(
+        question_text=question_text,
+        answer_a=model_a_answer,
+        answer_b=model_b_answer,
+        tools=row.tools,
+        judge_config=JUDGE_CONFIGS[judge_name],
+    )
+    games.append(result1)
+
+    # Round 2: B vs A (comparison vs original)
+    result2 = pairwise_judgment(
+        question_text=question_text,
+        answer_a=model_b_answer,
+        answer_b=model_a_answer,
+        tools=row.tools,
+        judge_config=JUDGE_CONFIGS[judge_name],
+    )
+    games.append(result2)
+
+    row.evaluation_result = EvaluateResult(
+        score=0.0,
+        reason=f"LLM Judge comparison: Round 1: {result1['score']}, Round 2: {result2['score']}"
+        if result1 and result2
+        else "Failed to get judgement scores",
+        metrics={
+            "round1_judgment": MetricResult(
+                score=0.0, reason=result1["judgment"] if result1 else "Failed to get judgment reason"
+            ),
+            "round2_judgment": MetricResult(
+                score=0.0, reason=result2["judgment"] if result2 else "Failed to get judgment reason"
+            ),
+        },
+    )
+
+    return {"model": model_name, "games": games}
+
+
+def push_scores_to_langfuse(rows: List[EvaluationRow], model_name: str, mean_score: float) -> None:
+    """Push scores back to Langfuse traces."""
+    try:
+        from eval_protocol.adapters.langfuse import create_langfuse_adapter
+
+        langfuse = create_langfuse_adapter().client
+
+        for trace_id in set(
+            row.input_metadata.session_data["langfuse_trace_id"]
+            for row in rows
+            if row.evaluation_result and row.input_metadata and row.input_metadata.session_data
+        ):
+            if trace_id:
+                langfuse.create_score(
+                    trace_id=trace_id,
+                    name=model_name,
+                    value=mean_score,
+                )
+    except Exception as e:
+        print(f"⚠️ Failed to push scores to Langfuse: {e}")

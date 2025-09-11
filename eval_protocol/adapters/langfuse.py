@@ -220,6 +220,10 @@ class LangfuseAdapter:
                     else:
                         # Fallback: convert entire output to string
                         messages.append(Message(role="assistant", content=str(trace.output)))
+                elif isinstance(trace.output, list):
+                    # Direct list of message dicts (same as input handling)
+                    for msg in trace.output:
+                        messages.append(self._dict_to_message(msg, include_tool_calls))
                 elif isinstance(trace.output, str):
                     messages.append(Message(role="assistant", content=trace.output))
 
