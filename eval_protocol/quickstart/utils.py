@@ -31,7 +31,8 @@ After providing your explanation, you must output only one of the following choi
 Example output: "My final verdict is tie: [[A=B]]"."""
 
 
-# Judge configurations, feel free to add your own!
+# Judge model configurations for Arena-Hard-Auto style evaluation
+# Each config specifies the model, parameters, and concurrency limits for LLM judges
 JUDGE_CONFIGS = {
     "gpt-4.1": {
         "model": "gpt-4.1",
@@ -49,7 +50,8 @@ JUDGE_CONFIGS = {
     },
 }
 
-# Label to score mapping for Arena-Hard-Auto judgments
+# Mapping from Arena-Hard-Auto judgment labels to numerical scores
+# Stronger preferences (>> or <<) get weighted more heavily (3x) than slight preferences
 LABEL_TO_SCORE = {
     "A>B": [1],
     "A>>B": [1] * 3,
@@ -200,7 +202,20 @@ def fetch_langfuse_traces_as_evaluation_rows(
     hours_back: Optional[int] = None,
     include_tool_calls: bool = True,
 ) -> List[EvaluationRow]:
-    """Fetch Langfuse traces as evaluation rows."""
+    """
+    Fetch Langfuse traces and convert them to EvaluationRow objects.
+
+    Args:
+        limit: Maximum number of traces to fetch
+        tags: Filter traces by tags
+        user_id: Filter traces by user ID
+        session_id: Filter traces by session ID
+        hours_back: Only fetch traces from the last N hours
+        include_tool_calls: Whether to include tool calls in messages
+
+    Returns:
+        List of EvaluationRow objects converted from Langfuse traces
+    """
     try:
         from eval_protocol.adapters.langfuse import create_langfuse_adapter
 
@@ -220,10 +235,17 @@ def fetch_langfuse_traces_as_evaluation_rows(
 
 def calculate_bootstrap_scores(judgments: List[Dict[str, Any]]) -> tuple[float, float, float]:
     """
-    Calculate bootstrap scores from judgments.
+    Calculate bootstrap confidence intervals for Arena-Hard-Auto style judgments.
+
+    Converts judgment labels (A>B, A>>B, etc.) to numerical scores, performs bootstrap
+    sampling to estimate score distribution, and returns mean with 90% confidence interval.
+
+    Args:
+        judgments: List of judgment dicts, each containing "games" with two rounds of scores
 
     Returns:
-        tuple: (mean_score, lower_score, upper_score)
+        tuple: (mean_score, lower_5th_percentile, upper_95th_percentile)
+               Returns (0.0, 0.0, 0.0) if no valid scores found
     """
     # Extract scores from judgments
     scores_data = []
@@ -255,15 +277,22 @@ def calculate_bootstrap_scores(judgments: List[Dict[str, Any]]) -> tuple[float, 
 
 def run_judgment(row: EvaluationRow, model_name: str, judge_name: str) -> Optional[Dict[str, Any]]:
     """
-    Run pairwise judgment for a single evaluation row.
+    Run Arena-Hard-Auto style pairwise judgment for a single evaluation row.
+
+    Performs two rounds of judgment (A vs B, B vs A) to reduce position bias:
+    - Round 1: ground_truth (original) vs messages[-1] (new model response)
+    - Round 2: messages[-1] (new model response) vs ground_truth (original)
+
+    Updates the row's evaluation_result with judgment details and returns results
+    for aggregation across the dataset.
 
     Args:
-        row: EvaluationRow to judge
-        model_name: Name of the model being evaluated
-        judge_name: Name of the judge config to use
+        row: EvaluationRow containing messages, ground_truth, and tools
+        model_name: Name of the model being evaluated (for result tracking)
+        judge_name: Key from JUDGE_CONFIGS to use for judgment
 
     Returns:
-        Dict containing model name and games results, or None if failed
+        Dict with "model" and "games" keys, or None if row has no messages
     """
     if not row.messages:
         return None
@@ -313,7 +342,21 @@ def run_judgment(row: EvaluationRow, model_name: str, judge_name: str) -> Option
 
 
 def push_scores_to_langfuse(rows: List[EvaluationRow], model_name: str, mean_score: float) -> None:
-    """Push scores back to Langfuse traces."""
+    """
+    Push evaluation scores back to Langfuse traces for tracking and analysis.
+
+    Creates a score entry in Langfuse for each unique trace_id found in the evaluation
+    rows' session data. This allows you to see evaluation results directly in the
+    Langfuse UI alongside the original traces.
+
+    Args:
+        rows: List of EvaluationRow objects with session_data containing trace IDs
+        model_name: Name of the model (used as the score name in Langfuse)
+        mean_score: The calculated mean score to push to Langfuse
+
+    Note:
+        Silently handles errors if Langfuse is unavailable or if rows lack session data
+    """
     try:
         from eval_protocol.adapters.langfuse import create_langfuse_adapter
 

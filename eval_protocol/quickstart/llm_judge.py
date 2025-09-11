@@ -44,12 +44,20 @@ from concurrent.futures import ThreadPoolExecutor
 )
 async def test_llm_judge(rows: list[EvaluationRow]) -> list[EvaluationRow]:
     """
-    Simplified LLM Judge for Arena-Hard-Auto pairwise comparisons.
+    LLM Judge evaluation using Arena-Hard-Auto style pairwise comparisons.
 
-    Each row contains:
-    - messages[:-1]: Question/prompt (conversation context)
-    - messages[-1]: Model B's answer (comparison model response)
-    - ground_truth: Model A's answer (original assistant response)
+    Compares model responses against ground truth using an LLM judge. For each row:
+    1. Extracts the question from messages[:-1]
+    2. Compares messages[-1] (new model response) vs ground_truth (baseline response)
+    3. Runs two judgment rounds (A vs B, B vs A) to reduce position bias
+    4. Calculates bootstrap scores across all comparisons
+    5. Updates evaluation_result with final scores and confidence intervals
+
+    Args:
+        rows: List of EvaluationRow objects with messages, ground_truth, and tools
+
+    Returns:
+        Same rows with updated evaluation_result containing scores and judgments
     """
 
     judge_name = "gemini-2.5-pro"  # Edit to which judge you'd like to use. Configs are in utils.py.
