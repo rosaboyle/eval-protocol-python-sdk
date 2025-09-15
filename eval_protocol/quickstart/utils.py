@@ -240,7 +240,7 @@ async def run_judgment_async(
     return {"model": model_name, "games": games}
 
 
-def calculate_bootstrap_scores(judgments: List[Dict[str, Any]]) -> tuple[float, float, float]:
+def calculate_bootstrap_scores(judgments: List[Dict[str, Any]]) -> Optional[tuple[float, float, float]]:
     """
     Calculate bootstrap confidence intervals for Arena-Hard-Auto style judgments.
 
@@ -251,8 +251,8 @@ def calculate_bootstrap_scores(judgments: List[Dict[str, Any]]) -> tuple[float, 
         judgments: List of judgment dicts, each containing "games" with two rounds of scores
 
     Returns:
-        tuple: (mean_score, lower_5th_percentile, upper_95th_percentile)
-               Returns (0.0, 0.0, 0.0) if no valid scores found
+        Optional[tuple]: (mean_score, lower_5th_percentile, upper_95th_percentile)
+                        Returns None if no valid scores found
     """
     # Extract scores from judgments
     scores_data = []
@@ -265,7 +265,7 @@ def calculate_bootstrap_scores(judgments: List[Dict[str, Any]]) -> tuple[float, 
                 scores_data.append(score)
 
     if not scores_data:
-        return 0.0, 0.0, 0.0
+        return None
 
     # Create DataFrame (single column of scores)
     battles = pd.DataFrame({"score": scores_data})

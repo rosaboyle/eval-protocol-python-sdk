@@ -111,11 +111,12 @@ async def test_llm_judge(rows: list[EvaluationRow]) -> list[EvaluationRow]:
     print(f"✅ Generated {len(judgments)} valid judgments")
 
     # Calculate bootstrap scores
-    mean_score, lower_score, upper_score = calculate_bootstrap_scores(judgments)
-
-    if mean_score == 0.0:
+    result = calculate_bootstrap_scores(judgments)
+    if not result:
         print("❌ No valid scores extracted")
         return rows
+
+    mean_score, lower_score, upper_score = result
 
     # Print leaderboard
     print("\n##### LLM Judge Results (90th percentile CI) #####")
@@ -128,9 +129,6 @@ async def test_llm_judge(rows: list[EvaluationRow]) -> list[EvaluationRow]:
     for row in rows:
         if row.evaluation_result:
             row.evaluation_result.score = mean_score
-            row.evaluation_result.standard_error = (upper_score - lower_score) / (
-                2 * 1.645
-            )  # Standard error approximation from 90% CI
 
     # Optional, push scores back to Langfuse. Note that one score per model will be pushed back onto same trace.
     push_scores_to_langfuse(rows, model_name, mean_score)
