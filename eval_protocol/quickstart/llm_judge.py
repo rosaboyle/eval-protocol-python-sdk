@@ -3,6 +3,7 @@ Default LLM judge for Eval Protocol. Inspired by Arena-Hard-Auto.
 """
 
 import os
+from datetime import datetime
 from typing import List, Dict, Any, Optional
 from tqdm import tqdm
 
@@ -14,32 +15,44 @@ from eval_protocol.pytest.default_single_turn_rollout_process import SingleTurnR
 from eval_protocol.quickstart.utils import (
     split_multi_turn_rows,
     JUDGE_CONFIGS,
-    fetch_langfuse_traces_as_evaluation_rows,
     calculate_bootstrap_scores,
     push_scores_to_langfuse,
-    run_judgment,
+    run_judgment_async,
 )
+import asyncio
+from openai import AsyncOpenAI
+from eval_protocol.adapters.langfuse import create_langfuse_adapter
 
-import concurrent.futures
-from concurrent.futures import ThreadPoolExecutor
+adapter = create_langfuse_adapter()
 
 
-@pytest.mark.skipif(os.environ.get("CI") == "true", reason="Skip in CI")
 @pytest.mark.asyncio
 @evaluation_test(
-    input_rows=[fetch_langfuse_traces_as_evaluation_rows()],
+    input_rows=[
+        adapter.get_evaluation_rows(
+            to_timestamp=datetime(2025, 9, 12, 0, 11, 18),
+            limit=711,
+            sample_size=50,
+            sleep_between_gets=3.0,
+            max_retries=5,
+        )
+    ],
     completion_params=[
+        {"model": "gpt-4.1"},
         {
-            "model": "fireworks_ai/accounts/fireworks/models/qwen3-235b-a22b-instruct-2507",
+            "max_tokens": 131000,
+            "extra_body": {"reasoning_effort": "medium"},
+            "model": "fireworks_ai/accounts/fireworks/models/gpt-oss-120b",
         },
         {
             "max_tokens": 131000,
             "extra_body": {"reasoning_effort": "low"},
-            "model": "fireworks_ai/accounts/fireworks/models/gpt-oss-120b",
+            "model": "fireworks_ai/accounts/fireworks/models/gpt-oss-20b",
         },
     ],
     rollout_processor=SingleTurnRolloutProcessor(),
     preprocess_fn=split_multi_turn_rows,
+    max_concurrent_rollouts=64,
     mode="all",
 )
 async def test_llm_judge(rows: list[EvaluationRow]) -> list[EvaluationRow]:
@@ -73,11 +86,21 @@ async def test_llm_judge(rows: list[EvaluationRow]) -> list[EvaluationRow]:
     judgments = []
     max_concurrency = JUDGE_CONFIGS[judge_name]["max_concurrency"]
 
-    with ThreadPoolExecutor(max_workers=max_concurrency) as executor:
-        futures = [executor.submit(run_judgment, row, model_name, judge_name) for row in rows]
+    judge_config = JUDGE_CONFIGS[judge_name]
 
-        for future in tqdm(concurrent.futures.as_completed(futures), total=len(futures), desc="Generating judgments"):
-            result = future.result()
+    async with AsyncOpenAI(
+        api_key=judge_config.get("api_key"), base_url=judge_config.get("base_url")
+    ) as shared_client:
+        semaphore = asyncio.Semaphore(max_concurrency)
+
+        async def run_judgment(row):
+            async with semaphore:
+                return await run_judgment_async(row, model_name, judge_name, shared_client)
+
+        tasks = [run_judgment(row) for row in rows]
+
+        for coro in tqdm(asyncio.as_completed(tasks), total=len(tasks), desc="Generating judgments"):
+            result = await coro
             if result and result["games"][0] and result["games"][1]:
                 judgments.append(result)
 

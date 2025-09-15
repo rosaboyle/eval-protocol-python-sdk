@@ -3,11 +3,13 @@ Arena-Hard-Auto utility functions adapted for Eval Protocol.
 """
 
 import os
+from datetime import datetime
 import re
 from typing import List, Dict, Any, Optional
 import pandas as pd
 
 from eval_protocol.models import EvaluationRow, Message, EvaluateResult, MetricResult
+import asyncio
 
 
 OG_ARENA_HARD_PROMPT = """Please act as an impartial judge and evaluate the quality of the responses provided by two AI assistants to the user prompt displayed below. You will be given assistant A's answer and assistant B's answer. Your job is to evaluate which assistant's answer is better.
@@ -46,7 +48,23 @@ JUDGE_CONFIGS = {
         "max_tokens": 32000,
         "api_key": os.getenv("GEMINI_API_KEY"),
         "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
-        "max_concurrency": 32,
+        "max_concurrency": 16,
+    },
+    "gemini-2.5-flash": {
+        "model": "gemini-2.5-flash",
+        "temperature": 1.0,
+        "max_tokens": 32000,
+        "api_key": os.getenv("GEMINI_API_KEY"),
+        "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
+        "max_concurrency": 16,
+    },
+    "kimi-k2-instruct-0905": {
+        "model": "accounts/fireworks/models/kimi-k2-instruct-0905",
+        "temperature": 0.6,  # Kimi recommended temperature
+        "max_tokens": 131000,
+        "api_key": os.getenv("FIREWORKS_API_KEY"),
+        "base_url": "https://api.fireworks.ai/inference/v1",
+        "max_concurrency": 64,
     },
 }
 
@@ -102,6 +120,7 @@ def split_multi_turn_rows(data: list[EvaluationRow]) -> list[EvaluationRow]:
         List of expanded EvaluationRow objects, one for each assistant message
     """
     expanded_rows = []
+    seen_traces: set[str] = set()
 
     for row in data:
         messages = row.messages
@@ -118,6 +137,12 @@ def split_multi_turn_rows(data: list[EvaluationRow]) -> list[EvaluationRow]:
             messages_before_assistant = messages[:pos]
             assistant_message = messages[pos]
 
+            # In this case, we trace every request, so we need to filter out duplicates
+            curr_trace = "\n".join(serialize_message(m) for m in messages_before_assistant)
+            if curr_trace in seen_traces:
+                continue
+            seen_traces.add(curr_trace)
+
             ground_truth_message = serialize_message(assistant_message)
 
             expanded_rows.append(
@@ -132,8 +157,8 @@ def split_multi_turn_rows(data: list[EvaluationRow]) -> list[EvaluationRow]:
     return expanded_rows
 
 
-def pairwise_judgment(question_text, answer_a, answer_b, tools, judge_config):
-    """Pairwise judgment function. Adapted from arena-hard-auto/gen_judgment.py"""
+async def pairwise_judgment_async(question_text, answer_a, answer_b, tools, judge_config, shared_client):
+    """Async pairwise judgment using a shared client."""
     user_prompt = f"""<|User Prompt|>
 {question_text}
 
@@ -143,39 +168,29 @@ def pairwise_judgment(question_text, answer_a, answer_b, tools, judge_config):
 
 <|The Start of Assistant B's Answer|>
 {answer_b}
-<|The End of Assistant B's Answer|>"""
+<|The End of Assistant B's Answer|>
 
-    messages = [
-        {
-            "role": "system",
-            "content": OG_ARENA_HARD_PROMPT,
-        },
-        {
-            "role": "user",
-            "content": user_prompt,
-        },
-    ]
+<|Available Tools|>
+{tools}
+<|End of Available Tools|>
+
+{OG_ARENA_HARD_PROMPT}"""
+
+    messages = [{"role": "user", "content": user_prompt}]
 
     try:
-        from openai import OpenAI
-
-        client = OpenAI(api_key=judge_config["api_key"], base_url=judge_config["base_url"])
-
         api_params = {
             "model": judge_config["model"],
-            "messages": messages,  # type: ignore
+            "messages": messages,
             "temperature": judge_config["temperature"],
             "max_tokens": judge_config["max_tokens"],
         }
 
         if tools:
             api_params["tools"] = tools
-            api_params["tool_choice"] = (
-                "none"  # Judge can see tools to help in response, but won't actually try to call them
-            )
+            api_params["tool_choice"] = "none"
 
-        response = client.chat.completions.create(**api_params)
-
+        response = await shared_client.chat.completions.create(**api_params)
         judgment_text = response.choices[0].message.content
         if not judgment_text:
             return None
@@ -185,52 +200,44 @@ def pairwise_judgment(question_text, answer_a, answer_b, tools, judge_config):
         return None
 
     score = get_score(judgment_text, [r"\[\[([AB<>=]+)\]\]", r"\[([AB<>=]+)\]"])
-
-    result = {
-        "score": score,
-        "judgment": judgment_text,
-        "prompt": messages,
-    }
-    return result
+    return {"score": score, "judgment": judgment_text, "prompt": messages}
 
 
-def fetch_langfuse_traces_as_evaluation_rows(
-    limit: int = 100,
-    tags: Optional[List[str]] = None,
-    user_id: Optional[str] = None,
-    session_id: Optional[str] = None,
-    hours_back: Optional[int] = None,
-    include_tool_calls: bool = True,
-) -> List[EvaluationRow]:
-    """
-    Fetch Langfuse traces and convert them to EvaluationRow objects.
+async def run_judgment_async(
+    row: EvaluationRow, model_name: str, judge_name: str, shared_client
+) -> Optional[Dict[str, Any]]:
+    """Async judgment using shared client to avoid cleanup issues."""
+    if not row.messages:
+        return None
 
-    Args:
-        limit: Maximum number of traces to fetch
-        tags: Filter traces by tags
-        user_id: Filter traces by user ID
-        session_id: Filter traces by session ID
-        hours_back: Only fetch traces from the last N hours
-        include_tool_calls: Whether to include tool calls in messages
+    question_text = "\n".join([serialize_message(msg) for msg in row.messages[:-1]])
+    model_a_answer = row.ground_truth
+    model_b_answer = serialize_message(row.messages[-1])
 
-    Returns:
-        List of EvaluationRow objects converted from Langfuse traces
-    """
-    try:
-        from eval_protocol.adapters.langfuse import create_langfuse_adapter
+    # Run both rounds concurrently with shared client
+    result1, result2 = await asyncio.gather(
+        pairwise_judgment_async(
+            question_text, model_a_answer, model_b_answer, row.tools, JUDGE_CONFIGS[judge_name], shared_client
+        ),
+        pairwise_judgment_async(
+            question_text, model_b_answer, model_a_answer, row.tools, JUDGE_CONFIGS[judge_name], shared_client
+        ),
+    )
 
-        adapter = create_langfuse_adapter()
-        return adapter.get_evaluation_rows(
-            limit=limit,
-            tags=tags,
-            user_id=user_id,
-            session_id=session_id,
-            hours_back=hours_back,
-            include_tool_calls=include_tool_calls,
-        )
-    except Exception as e:
-        print(f"❌ LangfuseAdapter failed: {e}")
-        return []
+    games = [result1, result2]
+
+    row.evaluation_result = EvaluateResult(
+        score=0.0,
+        reason=f"LLM Judge comparison: Round 1: {result1['score']}, Round 2: {result2['score']}"
+        if result1 and result2
+        else "Failed to get judgement scores",
+        metrics={
+            "round1_judgment": MetricResult(score=0.0, reason=result1["judgment"] if result1 else "Failed"),
+            "round2_judgment": MetricResult(score=0.0, reason=result2["judgment"] if result2 else "Failed"),
+        },
+    )
+
+    return {"model": model_name, "games": games}
 
 
 def calculate_bootstrap_scores(judgments: List[Dict[str, Any]]) -> tuple[float, float, float]:
@@ -273,72 +280,6 @@ def calculate_bootstrap_scores(judgments: List[Dict[str, Any]]) -> tuple[float, 
     upper_score = bootstraps.quantile(0.95)
 
     return mean_score, lower_score, upper_score
-
-
-def run_judgment(row: EvaluationRow, model_name: str, judge_name: str) -> Optional[Dict[str, Any]]:
-    """
-    Run Arena-Hard-Auto style pairwise judgment for a single evaluation row.
-
-    Performs two rounds of judgment (A vs B, B vs A) to reduce position bias:
-    - Round 1: ground_truth (original) vs messages[-1] (new model response)
-    - Round 2: messages[-1] (new model response) vs ground_truth (original)
-
-    Updates the row's evaluation_result with judgment details and returns results
-    for aggregation across the dataset.
-
-    Args:
-        row: EvaluationRow containing messages, ground_truth, and tools
-        model_name: Name of the model being evaluated (for result tracking)
-        judge_name: Key from JUDGE_CONFIGS to use for judgment
-
-    Returns:
-        Dict with "model" and "games" keys, or None if row has no messages
-    """
-    if not row.messages:
-        return None
-
-    question_text = "\n".join([serialize_message(msg) for msg in row.messages[:-1]])
-    model_a_answer = row.ground_truth
-    model_b_answer = serialize_message(row.messages[-1])
-
-    games = []
-
-    # Round 1: A vs B (original vs comparison)
-    result1 = pairwise_judgment(
-        question_text=question_text,
-        answer_a=model_a_answer,
-        answer_b=model_b_answer,
-        tools=row.tools,
-        judge_config=JUDGE_CONFIGS[judge_name],
-    )
-    games.append(result1)
-
-    # Round 2: B vs A (comparison vs original)
-    result2 = pairwise_judgment(
-        question_text=question_text,
-        answer_a=model_b_answer,
-        answer_b=model_a_answer,
-        tools=row.tools,
-        judge_config=JUDGE_CONFIGS[judge_name],
-    )
-    games.append(result2)
-
-    row.evaluation_result = EvaluateResult(
-        score=0.0,
-        reason=f"LLM Judge comparison: Round 1: {result1['score']}, Round 2: {result2['score']}"
-        if result1 and result2
-        else "Failed to get judgement scores",
-        metrics={
-            "round1_judgment": MetricResult(
-                score=0.0, reason=result1["judgment"] if result1 else "Failed to get judgment reason"
-            ),
-            "round2_judgment": MetricResult(
-                score=0.0, reason=result2["judgment"] if result2 else "Failed to get judgment reason"
-            ),
-        },
-    )
-
-    return {"model": model_name, "games": games}
 
 
 def push_scores_to_langfuse(rows: List[EvaluationRow], model_name: str, mean_score: float) -> None:
