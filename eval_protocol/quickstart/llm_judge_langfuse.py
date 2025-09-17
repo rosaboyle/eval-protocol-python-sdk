@@ -3,6 +3,7 @@ Example for using Langfuse with the aha judge.
 """
 
 from datetime import datetime
+import os
 
 import pytest
 
@@ -17,6 +18,7 @@ from eval_protocol.quickstart import aha_judge
 adapter = create_langfuse_adapter()
 
 
+@pytest.mark.skipif(os.environ.get("CI") == "true", reason="Skip in CI")
 @pytest.mark.asyncio
 @evaluation_test(
     input_rows=[
