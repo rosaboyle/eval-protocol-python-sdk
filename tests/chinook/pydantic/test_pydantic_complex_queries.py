@@ -1,7 +1,7 @@
 import os
 from pydantic import BaseModel
 from pydantic_ai import Agent
-from pydantic_ai.models.openai import OpenAIChatModel
+from pydantic_ai.models.openai import OpenAIChatModel, OpenAIChatModelSettings
 import pytest
 
 from eval_protocol.models import EvaluateResult, EvaluationRow
@@ -12,17 +12,22 @@ from tests.chinook.pydantic.agent import setup_agent
 from tests.pytest.test_pydantic_agent import PydanticAgentRolloutProcessor
 
 LLM_JUDGE_PROMPT = (
-    "Your job is to compare the response to the expected answer.\n"
-    "The response will be a narrative report of the query results.\n"
-    "If the response contains the same or well summarized information as the expected answer, return 1.0.\n"
-    "If the response does not contain the same information or is missing information, return 0.0."
+    "You will be given the user task, the response of an AI assistant, and the expected answer.\n"
+    "Compare the response to the expected answer. The response is a narrative report of the query results.\n"
+    "Reward for core information being provided correctly and ignore formatting issues.\n"
+    "Return a score from 0.0 to 1.0:\n"
+    "- 1.0: response contains all or well summarized information as the expected answer\n"
+    "- 0.0: response does not contain the same information or is missing all key information\n"
+    "- Values in between: partial credit for responses that are partially correct or contain some but not all of the expected information."
 )
 
 
 def agent_factory(config: RolloutProcessorConfig) -> Agent:
     model_name = config.completion_params["model"]
-    provider = config.completion_params["provider"]
-    model = OpenAIChatModel(model_name, provider=provider)
+    provider = config.completion_params.get("provider")
+    reasoning = config.completion_params.get("reasoning")
+    settings = OpenAIChatModelSettings(openai_reasoning_effort=reasoning)
+    model = OpenAIChatModel(model_name, provider=provider or "openai", settings=settings)
     return setup_agent(model)
 
 
@@ -34,12 +39,23 @@ def agent_factory(config: RolloutProcessorConfig) -> Agent:
 @evaluation_test(
     input_rows=[collect_dataset()],
     completion_params=[
-        {
-            "model": "accounts/fireworks/models/kimi-k2-instruct",
-            "provider": "fireworks",
-        },
+        # {
+        #     "model": "accounts/fireworks/models/kimi-k2-instruct",
+        #     "provider": "fireworks",
+        # },
+        # {
+        #     "model": "accounts/fireworks/models/deepseek-v3p1",
+        #     "provider": "fireworks",
+        # },
+        # {
+        #     "model": "accounts/fireworks/models/kimi-k2-instruct-0905",
+        #     "provider": "fireworks",
+        # },
+        {"model": "gpt-5"},
+        # {"model": "gpt-5", "reasoning": "high"},
     ],
     rollout_processor=PydanticAgentRolloutProcessor(agent_factory),
+    num_runs=2,
 )
 async def test_pydantic_complex_queries(row: EvaluationRow) -> EvaluationRow:
     """
@@ -58,9 +74,16 @@ async def test_pydantic_complex_queries(row: EvaluationRow) -> EvaluationRow:
         )
     else:
         model = OpenAIChatModel(
-            "accounts/fireworks/models/kimi-k2-instruct",
-            provider="fireworks",
+            "gpt-5",
         )
+
+        first_user_message = row.get_first_user_message()
+        if first_user_message is None:
+            row.evaluation_result = EvaluateResult(
+                score=0.0,
+                reason="No user message found",
+            )
+            return row
 
         class Response(BaseModel):
             """
@@ -81,7 +104,7 @@ async def test_pydantic_complex_queries(row: EvaluationRow) -> EvaluationRow:
             output_retries=5,
         )
         result = await comparison_agent.run(
-            f"Expected answer: {row.ground_truth}\nResponse: {last_assistant_message.content}"
+            f"User task: {first_user_message.content}\nResponse: {last_assistant_message.content}\nExpected answer: {row.ground_truth}"
         )
         row.evaluation_result = EvaluateResult(
             score=result.output.score,

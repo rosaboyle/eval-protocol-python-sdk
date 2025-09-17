@@ -2,9 +2,11 @@
 Default LLM judge for Eval Protocol. Inspired by Arena-Hard-Auto.
 """
 
+from collections.abc import Awaitable, Callable
 import os
 from datetime import datetime
 from typing import List, Dict, Any, Optional
+from typing_extensions import cast
 from tqdm import tqdm
 
 import pytest
@@ -55,6 +57,10 @@ adapter = create_langfuse_adapter()
     mode="all",
 )
 async def test_llm_judge(rows: list[EvaluationRow]) -> list[EvaluationRow]:
+    return await aha_judge(rows)
+
+
+async def aha_judge(rows: list[EvaluationRow], judge_name: str = "gemini-2.5-pro") -> list[EvaluationRow]:
     """
     LLM Judge evaluation using Arena-Hard-Auto style pairwise comparisons.
 
@@ -71,8 +77,6 @@ async def test_llm_judge(rows: list[EvaluationRow]) -> list[EvaluationRow]:
     Returns:
         Same rows with updated evaluation_result containing scores and judgments
     """
-
-    judge_name = "gemini-2.5-pro"  # Edit to which judge you'd like to use. Configs are in utils.py.
 
     if not rows:
         print("❌ No evaluation rows provided")

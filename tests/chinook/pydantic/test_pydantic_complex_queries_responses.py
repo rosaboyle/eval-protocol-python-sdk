@@ -19,21 +19,24 @@ from tests.chinook.pydantic.test_pydantic_complex_queries import test_pydantic_c
 
 def agent_factory(config: RolloutProcessorConfig) -> Agent:
     model_name = config.completion_params["model"]
-    model_settings = OpenAIResponsesModelSettings()
-    model = OpenAIResponsesModel(model_name)
+    reasoning = config.completion_params.get("reasoning")
+    settings = OpenAIResponsesModelSettings(
+        openai_reasoning_effort=reasoning,
+    )
+    model = OpenAIResponsesModel(model_name, settings=settings)
     return setup_agent(model)
 
 
-@pytest.mark.skipif(
+@pytest.mark.skipif(  # pyright: ignore[reportAttributeAccessIssue]
     os.environ.get("CI") == "true",
     reason="This was only run locally to generate traces in Responses API",
 )
-@pytest.mark.asyncio
+@pytest.mark.asyncio  # pyright: ignore[reportAttributeAccessIssue]
 @evaluation_test(
     input_rows=[collect_dataset()],
     completion_params=[
         {
-            "model": "gpt-4o",
+            "model": "gpt-5",
         },
     ],
     rollout_processor=PydanticAgentRolloutProcessor(agent_factory),
