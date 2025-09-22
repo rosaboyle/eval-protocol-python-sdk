@@ -51,13 +51,12 @@ input_rows = adapter.get_evaluation_rows(
             "model": "fireworks_ai/accounts/fireworks/models/kimi-k2-instruct-0905",
         },
     ],
-    ids=DefaultParameterIdGenerator.generate_id_from_dict,
 )
 @evaluation_test(
     input_rows=[input_rows],
     rollout_processor=SingleTurnRolloutProcessor(),
     preprocess_fn=multi_turn_assistant_to_ground_truth,
-    aggregation_method="bootstrap",
+    max_concurrent_evaluations=2,
 )
 async def test_llm_judge_openai_responses(row: EvaluationRow) -> EvaluationRow:
     return await aha_judge(row)
