@@ -17,10 +17,24 @@ import {
 } from "./util/query-params";
 
 // Default pivot configuration
-const DEFAULT_PIVOT_CONFIG: PivotConfig = {
+export const DEFAULT_QUALITY_PIVOT_CONFIG: PivotConfig = {
   selectedRowFields: ["$.eval_metadata.name"],
   selectedColumnFields: ["$.input_metadata.completion_params.model"],
-  selectedValueField: "$.evaluation_result.score",
+  selectedValueField: "$.evaluation_result.agg_score",
+  selectedAggregator: "avg",
+};
+
+export const DEFAULT_COST_PIVOT_CONFIG: PivotConfig = {
+  selectedRowFields: ["$.eval_metadata.name"],
+  selectedColumnFields: ["$.input_metadata.completion_params.model"],
+  selectedValueField: "$.execution_metadata.cost_metrics.total_cost",
+  selectedAggregator: "sum",
+};
+
+export const DEFAULT_SPEED_PIVOT_CONFIG: PivotConfig = {
+  selectedRowFields: ["$.eval_metadata.name"],
+  selectedColumnFields: ["$.input_metadata.completion_params.model"],
+  selectedValueField: "$.execution_metadata.duration_seconds",
   selectedAggregator: "avg",
 };
 
@@ -40,7 +54,7 @@ const DEFAULT_SORT_CONFIG: SortConfig = {
 };
 
 export const DEFAULT_GLOBAL_CONFIG: GlobalConfig = {
-  pivotConfig: DEFAULT_PIVOT_CONFIG,
+  pivotConfig: DEFAULT_QUALITY_PIVOT_CONFIG,
   filterConfig: DEFAULT_FILTER_CONFIG,
   paginationConfig: DEFAULT_PAGINATION_CONFIG,
   sortConfig: DEFAULT_SORT_CONFIG,
@@ -126,7 +140,10 @@ export class GlobalState {
         const parsed = JSON.parse(stored);
         // Merge with defaults to handle any missing properties
         return {
-          pivotConfig: { ...DEFAULT_PIVOT_CONFIG, ...parsed.pivotConfig },
+          pivotConfig: {
+            ...DEFAULT_QUALITY_PIVOT_CONFIG,
+            ...parsed.pivotConfig,
+          },
           filterConfig: Array.isArray(parsed.filterConfig)
             ? parsed.filterConfig
             : DEFAULT_FILTER_CONFIG,
@@ -202,8 +219,8 @@ export class GlobalState {
   }
 
   // Reset pivot configuration to defaults
-  resetPivotConfig() {
-    this.globalConfig.pivotConfig = { ...DEFAULT_PIVOT_CONFIG };
+  resetPivotConfig(config: PivotConfig = DEFAULT_QUALITY_PIVOT_CONFIG) {
+    this.globalConfig.pivotConfig = { ...config };
     this.saveGlobalConfig();
   }
 
