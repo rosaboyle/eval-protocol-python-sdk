@@ -281,6 +281,11 @@ class Message(BaseModel):
     tool_calls: Optional[List[ChatCompletionMessageToolCall]] = None
     function_call: Optional[FunctionCall] = None
     control_plane_step: Optional[Dict[str, Any]] = None
+    weight: Optional[int] = None
+
+    def dump_mdoel_for_chat_completion_request(self):
+        """Only keep chat completion accepted fields"""
+        return self.model_dump(exclude_none=True, exclude={"control_plane_step", "reasoning_content", "weight"})
 
     @classmethod
     def model_validate(cls, obj, *args, **kwargs):
