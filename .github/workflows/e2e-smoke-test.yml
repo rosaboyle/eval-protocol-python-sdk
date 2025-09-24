@@ -76,18 +76,20 @@ jobs:
             echo ""
 
             # Extract the EP Summary section from the terminal output (now multi-line)
-            EP_SUMMARY_SECTION=$(grep -A 10 "EP Summary |" test_output.log 2>/dev/null || echo "")
+            # First get the header line, then get the following lines with agg_score
+            EP_SUMMARY_HEADER=$(grep "EP Summary |" test_output.log 2>/dev/null || echo "")
+            EP_SUMMARY_SECTION=$(grep -A 5 "EP Summary |" test_output.log 2>/dev/null || echo "")
 
             if [ -n "$EP_SUMMARY_SECTION" ]; then
               echo "Found EP Summary section:"
               echo "$EP_SUMMARY_SECTION"
 
               # Parse the agg_score from the multi-line format: "  agg_score=0.420 (valid scores only)"
-              SUCCESS_RATE=$(echo "$EP_SUMMARY_SECTION" | grep -o "agg_score=[0-9.]*" | cut -d= -f2 2>/dev/null || echo "0")
+              SUCCESS_RATE=$(echo "$EP_SUMMARY_SECTION" | grep "agg_score=" | grep -o "agg_score=[0-9.]*" | cut -d= -f2 2>/dev/null || echo "0")
 
               # Extract other info from the header line
-              NUM_RUNS=$(echo "$EP_SUMMARY_SECTION" | grep -o "runs=[0-9]*" | cut -d= -f2 2>/dev/null || echo "0")
-              NUM_ROWS=$(echo "$EP_SUMMARY_SECTION" | grep -o "rows=[0-9]*" | cut -d= -f2 2>/dev/null || echo "0")
+              NUM_RUNS=$(echo "$EP_SUMMARY_HEADER" | grep -o "runs=[0-9]*" | cut -d= -f2 2>/dev/null || echo "0")
+              NUM_ROWS=$(echo "$EP_SUMMARY_HEADER" | grep -o "rows=[0-9]*" | cut -d= -f2 2>/dev/null || echo "0")
 
               echo "success_rate=$SUCCESS_RATE" >> $GITHUB_OUTPUT
 
