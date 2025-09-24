@@ -75,19 +75,19 @@ jobs:
             cat test_output.log
             echo ""
 
-            # Extract the EP Summary line from the terminal output
-            EP_SUMMARY_LINE=$(grep "EP Summary |" test_output.log 2>/dev/null || echo "")
+            # Extract the EP Summary section from the terminal output (now multi-line)
+            EP_SUMMARY_SECTION=$(grep -A 10 "EP Summary |" test_output.log 2>/dev/null || echo "")
 
-            if [ -n "$EP_SUMMARY_LINE" ]; then
-              echo "Found EP Summary line:"
-              echo "$EP_SUMMARY_LINE"
+            if [ -n "$EP_SUMMARY_SECTION" ]; then
+              echo "Found EP Summary section:"
+              echo "$EP_SUMMARY_SECTION"
 
-              # Parse the agg score from the line: "EP Summary | ... agg=0.420 ..."
-              SUCCESS_RATE=$(echo "$EP_SUMMARY_LINE" | grep -o "agg=[0-9.]*" | cut -d= -f2 2>/dev/null || echo "0")
+              # Parse the agg_score from the multi-line format: "  agg_score=0.420 (valid scores only)"
+              SUCCESS_RATE=$(echo "$EP_SUMMARY_SECTION" | grep -o "agg_score=[0-9.]*" | cut -d= -f2 2>/dev/null || echo "0")
 
-              # Extract other info
-              NUM_RUNS=$(echo "$EP_SUMMARY_LINE" | grep -o "runs=[0-9]*" | cut -d= -f2 2>/dev/null || echo "0")
-              NUM_ROWS=$(echo "$EP_SUMMARY_LINE" | grep -o "rows=[0-9]*" | cut -d= -f2 2>/dev/null || echo "0")
+              # Extract other info from the header line
+              NUM_RUNS=$(echo "$EP_SUMMARY_SECTION" | grep -o "runs=[0-9]*" | cut -d= -f2 2>/dev/null || echo "0")
+              NUM_ROWS=$(echo "$EP_SUMMARY_SECTION" | grep -o "rows=[0-9]*" | cut -d= -f2 2>/dev/null || echo "0")
 
               echo "success_rate=$SUCCESS_RATE" >> $GITHUB_OUTPUT
 
@@ -110,7 +110,7 @@ jobs:
               echo "  - Upper bound (≤60%) met: $([ "$UPPER_BOUND_MET" = "1" ] && echo "✅ YES" || echo "❌ NO")"
               echo "  - Within acceptable range: $([ "$THRESHOLD_MET" = "1" ] && echo "✅ YES" || echo "❌ NO")"
             else
-              echo "❌ No EP Summary line found in terminal output"
+              echo "❌ No EP Summary section found in terminal output"
               echo "threshold_met=0" >> $GITHUB_OUTPUT
               echo "success_rate=0" >> $GITHUB_OUTPUT
             fi
