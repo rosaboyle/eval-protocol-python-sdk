@@ -62,7 +62,7 @@ def status(rollout_id: str) -> StatusResponse:
 
 def main():
     host = os.getenv("REMOTE_SERVER_HOST", "127.0.0.1")
-    port = int(os.getenv("REMOTE_SERVER_PORT", "7077"))
+    port = int(os.getenv("REMOTE_SERVER_PORT", "3000"))
     uvicorn.run(app, host=host, port=port)
 
 

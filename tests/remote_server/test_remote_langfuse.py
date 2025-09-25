@@ -1,9 +1,15 @@
 # MANUAL SERVER STARTUP REQUIRED:
-# Before running this test, start the remote server manually:
-# cd /Users/derekxu/Documents/code/python-sdk
-# python -m tests.remote_server.remote_server
 #
-# The server should be running on http://127.0.0.1:7077
+# For Python server testing, start:
+# python -m tests.remote_server.remote_server (runs on http://127.0.0.1:7077)
+#
+# For TypeScript server testing, start:
+# cd /Users/derekxu/Documents/code/python-sdk/tests/remote_server/typescript-server
+# npm install
+# npm start
+#
+# The TypeScript server should be running on http://127.0.0.1:3000
+# You only need to start one of the servers!
 
 import os
 from typing import List
@@ -56,7 +62,7 @@ def rows() -> List[EvaluationRow]:
         generators=[rows],
     ),
     rollout_processor=RemoteRolloutProcessor(
-        remote_base_url="http://127.0.0.1:7077",
+        remote_base_url="http://127.0.0.1:3000",
         timeout_seconds=30,
         output_data_loader=langfuse_output_data_loader,
     ),
