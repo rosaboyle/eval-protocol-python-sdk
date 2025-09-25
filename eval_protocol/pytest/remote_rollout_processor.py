@@ -1,10 +1,11 @@
 import asyncio
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Callable
 
 import requests
 
-from eval_protocol.models import EvaluationRow
+from eval_protocol.models import EvaluationRow, Status
+from eval_protocol.data_loader.dynamic_data_loader import DynamicDataLoader
 from .rollout_processor import RolloutProcessor
 from .types import RolloutProcessorConfig
 
@@ -27,7 +28,6 @@ class RemoteRolloutProcessor(RolloutProcessor):
           "run_id": str | null,
           "row_id": str | null
         },
-        "num_turns": int
       }
       Returns: {"ok": true}
 
@@ -39,23 +39,22 @@ class RemoteRolloutProcessor(RolloutProcessor):
         self,
         *,
         remote_base_url: Optional[str] = None,
-        num_turns: int = 2,
         poll_interval: float = 1.0,
         timeout_seconds: float = 120.0,
+        output_data_loader: Callable[[str], DynamicDataLoader],
     ):
         # Prefer constructor-provided configuration. These can be overridden via
         # config.kwargs at call time for backward compatibility.
         self._remote_base_url = remote_base_url
-        self._num_turns = num_turns
         self._poll_interval = poll_interval
         self._timeout_seconds = timeout_seconds
+        self._output_data_loader = output_data_loader
 
     def __call__(self, rows: List[EvaluationRow], config: RolloutProcessorConfig) -> List[asyncio.Task[EvaluationRow]]:
         tasks: List[asyncio.Task[EvaluationRow]] = []
 
         # Start with constructor values
         remote_base_url: Optional[str] = self._remote_base_url
-        num_turns: int = self._num_turns
         poll_interval: float = self._poll_interval
         timeout_seconds: float = self._timeout_seconds
 
@@ -63,7 +62,6 @@ class RemoteRolloutProcessor(RolloutProcessor):
         if config.kwargs:
             if remote_base_url is None:
                 remote_base_url = config.kwargs.get("remote_base_url", remote_base_url)
-            num_turns = int(config.kwargs.get("num_turns", num_turns))
             poll_interval = float(config.kwargs.get("poll_interval", poll_interval))
             timeout_seconds = float(config.kwargs.get("timeout_seconds", timeout_seconds))
 
@@ -118,7 +116,6 @@ class RemoteRolloutProcessor(RolloutProcessor):
                 "messages": clean_messages,
                 "tools": row.tools,
                 "metadata": meta,
-                "num_turns": num_turns,
             }
 
             # Fire-and-poll
@@ -151,7 +148,29 @@ class RemoteRolloutProcessor(RolloutProcessor):
 
             # Update duration, regardless of termination
             row.execution_metadata.duration_seconds = time.perf_counter() - start_time
-            return row
+
+            if row.execution_metadata.rollout_id is None:
+                raise ValueError("Rollout ID is required in RemoteRolloutProcessor")
+
+            data_loader = self._output_data_loader(row.execution_metadata.rollout_id)
+
+            def _load_data():
+                return data_loader.load()
+
+            results = await asyncio.to_thread(_load_data)
+
+            output_rows: List[EvaluationRow] = [row for result in results for row in result.rows]
+
+            if len(output_rows) == 0:  # Fallback to original row if no Langfuse data found
+                row.rollout_status = Status(code=Status.Code.NOT_FOUND, message="No Langfuse data found for rollout")
+                return row
+            elif len(output_rows) == 1:  # Return the Langfuse row
+                langfuse_row = output_rows[0]
+                langfuse_row.input_metadata.completion_params = row.input_metadata.completion_params
+                langfuse_row.eval_metadata = row.eval_metadata
+                return langfuse_row
+            else:
+                raise ValueError("RemoteRolloutProcessor's output_data_loader should return exactly one row.")
 
         for r in rows:
             tasks.append(asyncio.create_task(_process_row(r)))

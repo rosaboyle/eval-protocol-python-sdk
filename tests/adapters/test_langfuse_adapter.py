@@ -1,7 +1,6 @@
 """Tests for Langfuse adapter."""
 
 from datetime import datetime, timedelta
-from types import SimpleNamespace
 from typing import Any, Dict, List, Optional
 from unittest.mock import Mock
 
@@ -63,16 +62,29 @@ def _create_mock_trace(
     trace_id: str, input_data: Any = None, output_data: Any = None, observations: Optional[List] = None
 ):
     """Helper to create mock trace objects"""
-    return SimpleNamespace(id=trace_id, input=input_data, output=output_data, observations=observations or [])
+    # Ensure observations have metadata attribute
+    obs_with_metadata = []
+    for obs in observations or []:
+        if hasattr(obs, "metadata"):
+            obs_with_metadata.append(obs)
+        else:
+            # Add metadata to existing observation
+            obs_dict = obs.__dict__ if hasattr(obs, "__dict__") else {}
+            obs_dict["metadata"] = getattr(obs, "metadata", {})
+            obs_with_metadata.append(Mock(**obs_dict))
+
+    return Mock(
+        id=trace_id, input=input_data, output=output_data, observations=obs_with_metadata, tags=[], metadata={}
+    )
 
 
 def _create_mock_traces_response(traces: List[Dict[str, Any]]):
     """Helper to create mock traces list response"""
     trace_objects = []
     for trace_data in traces:
-        trace_objects.append(SimpleNamespace(**trace_data))
+        trace_objects.append(Mock(**trace_data))
 
-    return SimpleNamespace(data=trace_objects, meta=SimpleNamespace(page=1, total_pages=1))
+    return Mock(data=trace_objects, meta=Mock(page=1, total_pages=1, total_items=len(trace_objects), limit=100))
 
 
 @pytest.fixture
@@ -101,8 +113,7 @@ def test_basic_trace_conversion():
         input_data={"messages": [{"role": "user", "content": "What's the weather?"}]},
         output_data={"messages": [{"role": "assistant", "content": "It's sunny!"}]},
     )
-
-    result = convert_trace_to_evaluation_row(trace)  # pyright: ignore[reportArgumentType]
+    result = convert_trace_to_evaluation_row(trace)
 
     assert result is not None
     assert len(result.messages) == 2
@@ -140,7 +151,7 @@ def test_trace_with_tool_calls():
         },
     )
 
-    result = convert_trace_to_evaluation_row(trace, include_tool_calls=True)  # pyright: ignore[reportArgumentType]
+    result = convert_trace_to_evaluation_row(trace, include_tool_calls=True)
 
     assert result is not None
     assert result.tools is not None
@@ -160,21 +171,27 @@ def test_trace_with_tool_calls():
 def test_trace_conversion_with_span_name():
     """Test trace conversion with specific span name"""
     # Mock observations with spans and generations
-    observations = [
-        SimpleNamespace(id="span1", name="judge", type="SPAN"),
-        SimpleNamespace(
-            id="gen1",
-            name="generation",
-            type="GENERATION",
-            parent_observation_id="span1",
-            input={"messages": [{"role": "user", "content": "Judge this"}]},
-            output={"messages": [{"role": "assistant", "content": "Good response"}]},
-            start_time=datetime.now(),
-        ),
-    ]
+    span_mock = Mock()
+    span_mock.id = "span1"
+    span_mock.name = "judge"
+    span_mock.type = "SPAN"
+    span_mock.metadata = {}
+    span_mock.parent_observation_id = None
+
+    gen_mock = Mock()
+    gen_mock.id = "gen1"
+    gen_mock.name = "generation"
+    gen_mock.type = "GENERATION"
+    gen_mock.parent_observation_id = "span1"
+    gen_mock.input = {"messages": [{"role": "user", "content": "Judge this"}]}
+    gen_mock.output = {"messages": [{"role": "assistant", "content": "Good response"}]}
+    gen_mock.start_time = datetime.now()
+    gen_mock.metadata = {}
+
+    observations = [span_mock, gen_mock]
 
     trace = _create_mock_trace("trace_span", observations=observations)
-    result = convert_trace_to_evaluation_row(trace, span_name="judge")  # pyright: ignore[reportArgumentType]
+    result = convert_trace_to_evaluation_row(trace, span_name="judge")
 
     assert result is not None
     assert len(result.messages) == 2
@@ -186,7 +203,7 @@ def test_empty_trace_returns_none():
     """Test that empty traces return None"""
     trace = _create_mock_trace("empty_trace", input_data=None, output_data=None)
 
-    result = convert_trace_to_evaluation_row(trace)  # pyright: ignore[reportArgumentType]
+    result = convert_trace_to_evaluation_row(trace)
 
     assert result is None
 
@@ -194,9 +211,9 @@ def test_empty_trace_returns_none():
 def test_malformed_trace_returns_none():
     """Test that malformed traces are handled gracefully"""
     # Trace with missing required attributes
-    trace = SimpleNamespace(id="malformed")  # Missing input/output
+    trace = Mock(id="malformed")  # Missing input/output
 
-    result = convert_trace_to_evaluation_row(trace)  # pyright: ignore[reportArgumentType]
+    result = convert_trace_to_evaluation_row(trace)
 
     assert result is None
 
