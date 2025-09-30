@@ -19,6 +19,7 @@ import json
 import pathlib
 import sys
 from pytest import StashKey
+import pytest
 
 
 def pytest_addoption(parser) -> None:
@@ -56,6 +57,7 @@ def pytest_addoption(parser) -> None:
         default=None,
         help=("Write a JSON summary artifact at the given path (e.g., ./outputs/aime_low.json)."),
     )
+    # deprecate this later
     group.addoption(
         "--ep-input-param",
         action="append",
@@ -114,6 +116,22 @@ def pytest_addoption(parser) -> None:
             "Disable saving and uploading of detailed experiment JSON files to Fireworks. "
             "Default: false (experiment JSONs are saved and uploaded by default)."
         ),
+    )
+    group.addoption(
+        "--ep-jsonl-path",
+        default=None,
+        help=("Load input from a jsonl file that is already in EvaluationRow or openai CHAT format"),
+    )
+    group.addoption(
+        "--ep-completion-params",
+        default=[],
+        action="append",
+        help=("Overwrite completion params with json. Can be used multiple times. "),
+    )
+    group.addoption(
+        "--ep-remote-rollout-processor-base-url",
+        default=None,
+        help=("If set, use this base URL for remote rollout processing. Example: http://localhost:8000"),
     )
 
 
@@ -242,6 +260,15 @@ def pytest_configure(config) -> None:
 
     if config.getoption("--ep-no-upload"):
         os.environ["EP_NO_UPLOAD"] = "1"
+
+    if config.getoption("--ep-jsonl-path"):
+        os.environ["EP_JSONL_PATH"] = config.getoption("--ep-jsonl-path")
+
+    if config.getoption("--ep-completion-params"):
+        # redump to json to make sure they are legit
+        os.environ["EP_COMPLETION_PARAMS"] = json.dumps(
+            [json.loads(s) for s in config.getoption("--ep-completion-params") or []]
+        )
 
     # Allow ad-hoc overrides of input params via CLI flags
     try:
