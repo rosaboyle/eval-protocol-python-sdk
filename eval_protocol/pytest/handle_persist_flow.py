@@ -16,9 +16,10 @@ import requests
 def handle_persist_flow(all_results: list[list[EvaluationRow]], test_func_name: str):
     try:
         # Default is to save and upload experiment JSONL files, unless explicitly disabled
-        should_save_and_upload = os.getenv("EP_NO_UPLOAD") != "1"
+        custom_output_dir = os.getenv("EP_OUTPUT_DIR")
+        should_save = os.getenv("EP_NO_UPLOAD") != "1" or custom_output_dir is not None
 
-        if should_save_and_upload:
+        if should_save:
             current_run_rows = [item for sublist in all_results for item in sublist]
             if current_run_rows:
                 experiments: dict[str, list[EvaluationRow]] = defaultdict(list)
@@ -27,6 +28,8 @@ def handle_persist_flow(all_results: list[list[EvaluationRow]], test_func_name: 
                         experiments[row.execution_metadata.experiment_id].append(row)
 
                 eval_protocol_dir = find_eval_protocol_dir()
+                if custom_output_dir:
+                    eval_protocol_dir = custom_output_dir
                 exp_dir = pathlib.Path(eval_protocol_dir) / "experiment_results"
                 exp_dir.mkdir(parents=True, exist_ok=True)
 
@@ -80,6 +83,10 @@ def handle_persist_flow(all_results: list[list[EvaluationRow]], test_func_name: 
 
                             json.dump(row_data, f, ensure_ascii=False)
                             f.write("\n")
+
+                    should_upload = os.getenv("EP_NO_UPLOAD") != "1"
+                    if not should_upload:
+                        continue
 
                     def get_auth_value(key: str) -> str | None:
                         """Get auth value from config file or environment."""

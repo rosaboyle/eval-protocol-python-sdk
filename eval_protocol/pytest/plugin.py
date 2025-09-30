@@ -133,6 +133,11 @@ def pytest_addoption(parser) -> None:
         default=None,
         help=("If set, use this base URL for remote rollout processing. Example: http://localhost:8000"),
     )
+    group.addoption(
+        "--ep-output-dir",
+        default=None,
+        help=("If set, save evaluation results to this directory in jsonl format."),
+    )
 
 
 def _normalize_max_rows(val: Optional[str]) -> Optional[str]:
@@ -257,6 +262,10 @@ def pytest_configure(config) -> None:
     threshold_env = _build_passed_threshold_env(norm_success, norm_se)
     if threshold_env is not None:
         os.environ["EP_PASSED_THRESHOLD"] = threshold_env
+
+    if config.getoption("--ep-output-dir"):
+        # set this to save eval results to the target dir in jsonl format
+        os.environ["EP_OUTPUT_DIR"] = config.getoption("--ep-output-dir")
 
     if config.getoption("--ep-no-upload"):
         os.environ["EP_NO_UPLOAD"] = "1"
