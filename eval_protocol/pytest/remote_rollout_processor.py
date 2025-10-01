@@ -6,10 +6,15 @@ import requests
 
 from eval_protocol.models import EvaluationRow, Status
 from eval_protocol.data_loader.dynamic_data_loader import DynamicDataLoader
-from eval_protocol.types.remote_rollout_processor import InitRequest, RolloutMetadata
+from eval_protocol.types.remote_rollout_processor import ElasticSearchConfig, InitRequest, RolloutMetadata
 from .rollout_processor import RolloutProcessor
 from .types import RolloutProcessorConfig
+from .elasticsearch_setup import ElasticsearchSetup
+import logging
+
 import os
+
+logger = logging.getLogger(__name__)
 
 
 class RemoteRolloutProcessor(RolloutProcessor):
@@ -27,6 +32,8 @@ class RemoteRolloutProcessor(RolloutProcessor):
         poll_interval: float = 1.0,
         timeout_seconds: float = 120.0,
         output_data_loader: Callable[[str], DynamicDataLoader],
+        disable_elastic_search: bool = False,
+        elastic_search_config: Optional[ElasticSearchConfig] = None,
     ):
         # Prefer constructor-provided configuration. These can be overridden via
         # config.kwargs at call time for backward compatibility.
@@ -37,6 +44,21 @@ class RemoteRolloutProcessor(RolloutProcessor):
         self._poll_interval = poll_interval
         self._timeout_seconds = timeout_seconds
         self._output_data_loader = output_data_loader
+        self._disable_elastic_search = disable_elastic_search
+        self._elastic_search_config = elastic_search_config
+
+    def setup(self) -> None:
+        if self._disable_elastic_search:
+            logger.info("Elasticsearch is disabled, skipping setup")
+            return
+        logger.info("Setting up Elasticsearch")
+        self._elastic_search_config = self._setup_elastic_search()
+        logger.info("Elasticsearch setup complete")
+
+    def _setup_elastic_search(self) -> ElasticSearchConfig:
+        """Set up Elasticsearch using the dedicated setup module."""
+        setup = ElasticsearchSetup()
+        return setup.setup_elasticsearch()
 
     def __call__(self, rows: List[EvaluationRow], config: RolloutProcessorConfig) -> List[asyncio.Task[EvaluationRow]]:
         tasks: List[asyncio.Task[EvaluationRow]] = []
@@ -119,6 +141,7 @@ class RemoteRolloutProcessor(RolloutProcessor):
                 tools=row.tools,
                 metadata=meta,
                 model_base_url=model_base_url,
+                elastic_search_config=self._elastic_search_config,
             )
 
             # Fire-and-poll
@@ -197,6 +220,11 @@ class RemoteRolloutProcessor(RolloutProcessor):
                     langfuse_row.input_metadata.dataset_info = row.input_metadata.dataset_info
                 langfuse_row.eval_metadata = row.eval_metadata
                 langfuse_row.ground_truth = row.ground_truth
+
+                # this is useful to detect stopped evaluations so we can update
+                # the status in the logs server
+                langfuse_row.pid = row.pid
+
                 return langfuse_row
             else:
                 raise ValueError("RemoteRolloutProcessor's output_data_loader should return exactly one row.")
