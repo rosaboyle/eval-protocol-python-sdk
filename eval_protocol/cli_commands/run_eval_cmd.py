@@ -17,7 +17,6 @@ from omegaconf import (  # Ensure MISSING is imported if used in configs
     OmegaConf,
 )
 
-from eval_protocol.execution.pipeline import EvaluationPipeline
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +25,8 @@ def run_evaluation_command_logic(cfg: DictConfig) -> None:
     """
     Main logic for the 'run-evaluation' command.
     """
+    from eval_protocol.execution.pipeline import EvaluationPipeline
+
     logger.info("Starting 'run-evaluation' command with resolved Hydra config.")
 
     # Make Hydra's runtime output directory available to the pipeline if needed

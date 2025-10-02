@@ -15,14 +15,8 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 
-from eval_protocol.evaluation import create_evaluation, preview_evaluation
-
 from .cli_commands.agent_eval_cmd import agent_eval_command
-from .cli_commands.common import (
-    check_agent_environment,
-    check_environment,
-    setup_logging,
-)
+from .cli_commands.common import setup_logging
 from .cli_commands.deploy import deploy_command
 from .cli_commands.deploy_mcp import deploy_mcp_command
 from .cli_commands.logs import logs_command

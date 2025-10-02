@@ -27,11 +27,7 @@ import logging  # For logger instance
 import os  # For environment variables
 from pathlib import Path
 
-from pydantic import ValidationError
-
-from eval_protocol.agent import Orchestrator
 from eval_protocol.agent.task_manager import TaskManager
-from eval_protocol.models import TaskDefinitionModel  # Import the new Pydantic model
 
 # setup_logging is already called in cli.py's main, but good for standalone use if any
 # from .common import setup_logging
