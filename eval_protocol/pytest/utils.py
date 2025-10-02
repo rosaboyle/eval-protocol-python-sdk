@@ -33,6 +33,8 @@ import random
 import statistics
 
 
+logger = logging.getLogger(__name__)
+
 AggregationMethod = Literal["mean", "max", "min", "bootstrap"]
 
 
@@ -495,10 +497,18 @@ def add_cost_metrics(row: EvaluationRow) -> None:
     input_tokens = usage.prompt_tokens or 0
     output_tokens = usage.completion_tokens or 0
 
-    input_cost, output_cost = cost_per_token(
-        model=model_id, prompt_tokens=input_tokens, completion_tokens=output_tokens
-    )
-    total_cost = input_cost + output_cost
+    # Try to calculate costs, but gracefully handle unknown models
+    try:
+        input_cost, output_cost = cost_per_token(
+            model=model_id, prompt_tokens=input_tokens, completion_tokens=output_tokens
+        )
+        total_cost = input_cost + output_cost
+    except Exception as e:
+        # Model not in LiteLLM's database - set costs to 0 and continue
+        logger.debug(f"Could not calculate cost for model '{model_id}': {e}")
+        input_cost = 0.0
+        output_cost = 0.0
+        total_cost = 0.0
 
     # Set all cost metrics on the row
     row.execution_metadata.cost_metrics = CostMetrics(
