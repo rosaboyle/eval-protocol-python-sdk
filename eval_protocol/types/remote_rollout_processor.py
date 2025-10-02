@@ -4,10 +4,11 @@ Request and response models for remote rollout processor servers.
 
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
+from urllib.parse import urlparse
 from eval_protocol.models import Message, Status
 
 
-class ElasticSearchConfig(BaseModel):
+class ElasticsearchConfig(BaseModel):
     """
     Configuration for Elasticsearch.
     """
@@ -15,6 +16,12 @@ class ElasticSearchConfig(BaseModel):
     url: str
     api_key: str
     index_name: str
+
+    @property
+    def verify_ssl(self) -> bool:
+        """Infer verify_ssl from URL scheme."""
+        parsed_url = urlparse(self.url)
+        return parsed_url.scheme == "https"
 
 
 class RolloutMetadata(BaseModel):
@@ -31,7 +38,7 @@ class InitRequest(BaseModel):
     """Request model for POST /init endpoint."""
 
     model: str
-    elastic_search_config: Optional[ElasticSearchConfig] = None
+    elastic_search_config: Optional[ElasticsearchConfig] = None
     messages: Optional[List[Message]] = None
     tools: Optional[List[Dict[str, Any]]] = None
 

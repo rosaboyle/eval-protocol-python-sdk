@@ -1,6 +1,6 @@
-import requests
 from typing import Dict, Any, Optional
-from urllib.parse import urlparse
+from .elasticsearch_client import ElasticsearchClient
+from eval_protocol.types.remote_rollout_processor import ElasticsearchConfig
 
 
 class ElasticsearchIndexManager:
@@ -14,15 +14,9 @@ class ElasticsearchIndexManager:
             index_name: Name of the index to manage
             api_key: API key for authentication
         """
-        self.base_url: str = base_url.rstrip("/")
-        self.index_name: str = index_name
-        self.api_key: str = api_key
-        self.index_url: str = f"{self.base_url}/{self.index_name}"
+        self.config = ElasticsearchConfig(url=base_url, api_key=api_key, index_name=index_name)
+        self.client = ElasticsearchClient(self.config)
         self._mapping_created: bool = False
-
-        # Parse URL to determine if we should verify SSL
-        parsed_url = urlparse(base_url)
-        self.verify_ssl = parsed_url.scheme == "https"
 
     def create_logging_index_mapping(self) -> bool:
         """Create index with proper mapping for logging data.
@@ -41,25 +35,22 @@ class ElasticsearchIndexManager:
 
             # If index exists but has wrong mapping, delete and recreate it
             if self.index_exists():
-                print(f"Warning: Index {self.index_name} exists with incorrect mapping. Deleting and recreating...")
+                print(
+                    f"Warning: Index {self.config.index_name} exists with incorrect mapping. Deleting and recreating..."
+                )
                 if not self.delete_index():
-                    print(f"Warning: Failed to delete existing index {self.index_name}")
+                    print(f"Warning: Failed to delete existing index {self.config.index_name}")
                     return False
 
             # Create index with proper mapping
             mapping = self._get_logging_mapping()
-            response = requests.put(
-                self.index_url,
-                headers={"Content-Type": "application/json", "Authorization": f"ApiKey {self.api_key}"},
-                json=mapping,
-                verify=self.verify_ssl,
-            )
+            success = self.client.create_index(mapping)
 
-            if response.status_code in [200, 201]:
+            if success:
                 self._mapping_created = True
                 return True
             else:
-                print(f"Warning: Failed to create index mapping: {response.status_code} - {response.text}")
+                print("Warning: Failed to create index mapping")
                 return False
 
         except Exception as e:
@@ -74,46 +65,50 @@ class ElasticsearchIndexManager:
         """
         try:
             # Check if index exists
-            response = requests.head(
-                self.index_url, headers={"Authorization": f"ApiKey {self.api_key}"}, verify=self.verify_ssl
-            )
-
-            if response.status_code != 200:
+            if not self.client.index_exists():
                 return False
 
             # Check if mapping is correct
-            mapping_response = requests.get(
-                f"{self.index_url}/_mapping",
-                headers={"Authorization": f"ApiKey {self.api_key}"},
-                verify=self.verify_ssl,
-            )
-
-            if mapping_response.status_code != 200:
+            mapping_data = self.client.get_mapping()
+            if mapping_data is None:
                 return False
 
-            mapping_data = mapping_response.json()
             return self._has_correct_timestamp_mapping(mapping_data)
 
         except Exception:
             return False
 
     def _has_correct_timestamp_mapping(self, mapping_data: Dict[str, Any]) -> bool:
-        """Check if the mapping has @timestamp as a date field.
+        """Check if the mapping has @timestamp as a date field, rollout_id as a keyword field, and status fields.
 
         Args:
             mapping_data: Elasticsearch mapping response data
 
         Returns:
-            bool: True if @timestamp is correctly mapped as date field
+            bool: True if all required fields are correctly mapped
         """
         try:
-            return (
-                self.index_name in mapping_data
-                and "mappings" in mapping_data[self.index_name]
-                and "properties" in mapping_data[self.index_name]["mappings"]
-                and "@timestamp" in mapping_data[self.index_name]["mappings"]["properties"]
-                and mapping_data[self.index_name]["mappings"]["properties"]["@timestamp"].get("type") == "date"
-            )
+            if not (
+                self.config.index_name in mapping_data
+                and "mappings" in mapping_data[self.config.index_name]
+                and "properties" in mapping_data[self.config.index_name]["mappings"]
+            ):
+                return False
+
+            properties = mapping_data[self.config.index_name]["mappings"]["properties"]
+
+            # Check @timestamp is mapped as date
+            timestamp_ok = "@timestamp" in properties and properties["@timestamp"].get("type") == "date"
+
+            # Check rollout_id is mapped as keyword
+            rollout_id_ok = "rollout_id" in properties and properties["rollout_id"].get("type") == "keyword"
+
+            # Check status fields are mapped correctly
+            status_code_ok = "status_code" in properties and properties["status_code"].get("type") == "integer"
+            status_message_ok = "status_message" in properties and properties["status_message"].get("type") == "text"
+            status_details_ok = "status_details" in properties and properties["status_details"].get("type") == "object"
+
+            return timestamp_ok and rollout_id_ok and status_code_ok and status_message_ok and status_details_ok
         except (KeyError, TypeError):
             return False
 
@@ -130,6 +125,10 @@ class ElasticsearchIndexManager:
                     "level": {"type": "keyword"},
                     "message": {"type": "text"},
                     "logger_name": {"type": "keyword"},
+                    "rollout_id": {"type": "keyword"},
+                    "status_code": {"type": "integer"},
+                    "status_message": {"type": "text"},
+                    "status_details": {"type": "object"},
                 }
             }
         }
@@ -141,14 +140,12 @@ class ElasticsearchIndexManager:
             bool: True if index was deleted successfully, False otherwise.
         """
         try:
-            response = requests.delete(
-                self.index_url, headers={"Authorization": f"ApiKey {self.api_key}"}, verify=self.verify_ssl
-            )
-            if response.status_code in [200, 404]:  # 404 means index doesn't exist, which is fine
+            success = self.client.delete_index()
+            if success:
                 self._mapping_created = False
                 return True
             else:
-                print(f"Warning: Failed to delete index: {response.status_code} - {response.text}")
+                print("Warning: Failed to delete index")
                 return False
         except Exception as e:
             print(f"Warning: Failed to delete index: {e}")
@@ -160,13 +157,7 @@ class ElasticsearchIndexManager:
         Returns:
             bool: True if index exists, False otherwise.
         """
-        try:
-            response = requests.head(
-                self.index_url, headers={"Authorization": f"ApiKey {self.api_key}"}, verify=self.verify_ssl
-            )
-            return response.status_code == 200
-        except Exception:
-            return False
+        return self.client.index_exists()
 
     def get_index_stats(self) -> Optional[Dict[str, Any]]:
         """Get statistics about the index.
@@ -174,14 +165,4 @@ class ElasticsearchIndexManager:
         Returns:
             Dict containing index statistics, or None if failed
         """
-        try:
-            response = requests.get(
-                f"{self.index_url}/_stats",
-                headers={"Authorization": f"ApiKey {self.api_key}"},
-                verify=self.verify_ssl,
-            )
-            if response.status_code == 200:
-                return response.json()
-            return None
-        except Exception:
-            return None
+        return self.client.get_index_stats()

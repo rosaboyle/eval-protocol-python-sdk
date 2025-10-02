@@ -4,9 +4,10 @@ from typing import Any, Dict, List, Optional, Callable
 
 import requests
 
+from eval_protocol.logging.elasticsearch_client import ElasticsearchClient
 from eval_protocol.models import EvaluationRow, Status
 from eval_protocol.data_loader.dynamic_data_loader import DynamicDataLoader
-from eval_protocol.types.remote_rollout_processor import ElasticSearchConfig, InitRequest, RolloutMetadata
+from eval_protocol.types.remote_rollout_processor import ElasticsearchConfig, InitRequest, RolloutMetadata
 from .rollout_processor import RolloutProcessor
 from .types import RolloutProcessorConfig
 from .elasticsearch_setup import ElasticsearchSetup
@@ -33,7 +34,7 @@ class RemoteRolloutProcessor(RolloutProcessor):
         timeout_seconds: float = 120.0,
         output_data_loader: Callable[[str], DynamicDataLoader],
         disable_elastic_search: bool = False,
-        elastic_search_config: Optional[ElasticSearchConfig] = None,
+        elastic_search_config: Optional[ElasticsearchConfig] = None,
     ):
         # Prefer constructor-provided configuration. These can be overridden via
         # config.kwargs at call time for backward compatibility.
@@ -56,7 +57,7 @@ class RemoteRolloutProcessor(RolloutProcessor):
         self._elastic_search_config = self._setup_elastic_search()
         logger.info("Elasticsearch setup complete")
 
-    def _setup_elastic_search(self) -> ElasticSearchConfig:
+    def _setup_elastic_search(self) -> ElasticsearchConfig:
         """Set up Elasticsearch using the dedicated setup module."""
         setup = ElasticsearchSetup()
         return setup.setup_elasticsearch()
@@ -182,6 +183,10 @@ class RemoteRolloutProcessor(RolloutProcessor):
                 r = requests.get(url, params={"rollout_id": row.execution_metadata.rollout_id}, timeout=15)
                 r.raise_for_status()
                 return r.json()
+
+            elasticsearch_client = (
+                ElasticsearchClient(self._elastic_search_config) if self._elastic_search_config else None
+            )
 
             while time.time() < deadline:
                 try:

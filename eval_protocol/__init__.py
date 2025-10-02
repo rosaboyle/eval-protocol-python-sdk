@@ -24,7 +24,7 @@ from .mcp_env import (
 )
 from .data_loader import DynamicDataLoader, InlineDataLoader
 from . import mcp, rewards
-from .models import EvaluateResult, Message, MetricResult, EvaluationRow, InputMetadata
+from .models import EvaluateResult, Message, MetricResult, EvaluationRow, InputMetadata, Status
 from .playback_policy import PlaybackPolicyBase
 from .resources import create_llm_resource
 from .reward_function import RewardFunction
@@ -63,6 +63,7 @@ except ImportError:
 warnings.filterwarnings("default", category=DeprecationWarning, module="eval_protocol")
 
 __all__ = [
+    "Status",
     "RemoteRolloutProcessor",
     "InputMetadata",
     "EvaluationRow",
