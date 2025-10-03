@@ -1,27 +1,30 @@
 import os
+import random
 import threading
-from typing import Any, Dict
 
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from openai import OpenAI
+import logging
 
-from eval_protocol.types.remote_rollout_processor import (
-    InitRequest,
-    StatusResponse,
-)
+from eval_protocol import Status, InitRequest, ElasticsearchDirectHttpHandler, RolloutIdFilter
 
 
 app = FastAPI()
 
-
-_STATE: Dict[str, Dict[str, Any]] = {}
+# attach handler to root logger
+handler = ElasticsearchDirectHttpHandler()
+logging.getLogger().addHandler(handler)
 
 
 @app.post("/init")
 def init(req: InitRequest):
-    # Persist state
-    _STATE[req.metadata.rollout_id] = {"terminated": False}
+    if req.elastic_search_config:
+        handler.configure(req.elastic_search_config)
+
+    # attach rollout_id filter to logger
+    logger = logging.getLogger(f"{__name__}.{req.metadata.rollout_id}")
+    logger.addFilter(RolloutIdFilter(req.metadata.rollout_id))
 
     # Kick off worker thread that does a single-turn chat via Langfuse OpenAI integration
     def _worker():
@@ -39,25 +42,22 @@ def init(req: InitRequest):
 
             client = OpenAI(base_url=req.model_base_url, api_key=os.environ.get("FIREWORKS_API_KEY"))
 
+            logger.info(f"Sending completion request to model {req.model}")
             completion = client.chat.completions.create(**completion_kwargs)
+            logger.info(f"Completed response: {completion}")
 
         except Exception as e:
             # Best-effort; mark as done even on error to unblock polling
             print(f"❌ Error in rollout {req.metadata.rollout_id}: {e}")
             pass
         finally:
-            _STATE[req.metadata.rollout_id]["terminated"] = True
+            logger.info(
+                f"Rollout {req.metadata.rollout_id} completed",
+                extra={"status": Status.rollout_finished()},
+            )
 
     t = threading.Thread(target=_worker, daemon=True)
     t.start()
-
-
-@app.get("/status", response_model=StatusResponse)
-def status(rollout_id: str) -> StatusResponse:
-    st = _STATE.get(rollout_id)
-    if not st:
-        raise HTTPException(status_code=404, detail="unknown rollout_id")
-    return StatusResponse(terminated=bool(st.get("terminated", False)))
 
 
 def main():

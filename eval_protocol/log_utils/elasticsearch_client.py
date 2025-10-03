@@ -6,10 +6,9 @@ used throughout the codebase, including index management, document operations,
 and search functionality.
 """
 
-import json
 import requests
 from typing import Any, Dict, List, Optional, Union
-from urllib.parse import urlparse
+from eval_protocol.models import Status
 from eval_protocol.types.remote_rollout_processor import ElasticsearchConfig
 
 
@@ -203,33 +202,39 @@ class ElasticsearchClient:
         except Exception:
             return None
 
-    def search_by_term(self, field: str, value: Any, size: int = 10) -> Optional[Dict[str, Any]]:
+    def search_by_term(
+        self, field: str, value: Any, size: int = 10, sort: Optional[List[Dict[str, Any]]] = None
+    ) -> Optional[Dict[str, Any]]:
         """Search documents by exact term match.
 
         Args:
             field: Field name to search
             value: Value to match
             size: Number of results to return
+            sort: Sort specification
 
         Returns:
             Dict containing search results, or None if failed
         """
         query = {"term": {field: value}}
-        return self.search(query, size=size)
+        return self.search(query, size=size, sort=sort)
 
-    def search_by_match(self, field: str, value: str, size: int = 10) -> Optional[Dict[str, Any]]:
+    def search_by_match(
+        self, field: str, value: str, size: int = 10, sort: Optional[List[Dict[str, Any]]] = None
+    ) -> Optional[Dict[str, Any]]:
         """Search documents by text match.
 
         Args:
             field: Field name to search
             value: Text to match
             size: Number of results to return
+            sort: Sort specification (e.g., [{"@timestamp": {"order": "desc"}}])
 
         Returns:
             Dict containing search results, or None if failed
         """
         query = {"match": {field: value}}
-        return self.search(query, size=size)
+        return self.search(query, size=size, sort=sort)
 
     def search_by_match_phrase_prefix(self, field: str, value: str, size: int = 10) -> Optional[Dict[str, Any]]:
         """Search documents by phrase prefix match.
@@ -255,6 +260,34 @@ class ElasticsearchClient:
             Dict containing search results, or None if failed
         """
         query = {"match_all": {}}
+        return self.search(query, size=size)
+
+    def search_by_status_code_not_in(
+        self,
+        rollout_id: str,
+        excluded_codes: list[Status.Code],
+        size: int = 10,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Search documents where status_code does NOT match any of the provided status codes.
+
+        Args:
+            excluded_codes: List of status codes to exclude (i.e., find logs NOT having these codes)
+            size: Number of results to return
+            rollout_id: Optional rollout ID to filter by
+
+        Returns:
+            Dict containing search results, or None if failed
+        """
+        # Build the query with must_not for status code exclusion
+        bool_query: dict[str, list[dict[str, Any]]] = {
+            "must_not": [{"terms": {"status_code": [code.value for code in excluded_codes]}}]
+        }
+
+        # Add rollout_id filter and ensure status_code exists
+        bool_query["must"] = [{"term": {"rollout_id": rollout_id}}, {"exists": {"field": "status_code"}}]
+
+        query = {"bool": bool_query}
         return self.search(query, size=size)
 
     # Health and Status Operations
