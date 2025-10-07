@@ -6,6 +6,7 @@ and converting them to EvaluationRow format for use in evaluation pipelines.
 Available adapters:
 - BaseAdapter: Abstract base class for all adapters
 - LangfuseAdapter: Pull data from Langfuse deployments
+- FireworksTracingAdapter: Pull data from Langfuse via Fireworks tracing proxy
 - HuggingFaceAdapter: Load datasets from HuggingFace Hub
 - BigQueryAdapter: Query data from Google BigQuery
 - TRL integration (legacy)
@@ -23,6 +24,10 @@ try:
     __all__.extend(["LangfuseAdapter", "create_langfuse_adapter"])
 except ImportError:
     pass
+
+from .fireworks_tracing import FireworksTracingAdapter
+
+__all__.extend(["FireworksTracingAdapter"])
 
 try:
     from .huggingface import (
