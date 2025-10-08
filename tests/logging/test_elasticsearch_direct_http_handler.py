@@ -2,6 +2,7 @@ import os
 import logging
 import time
 import pytest
+from datetime import datetime, timezone
 
 from eval_protocol.log_utils.elasticsearch_direct_http_handler import ElasticsearchDirectHttpHandler
 from eval_protocol.log_utils.elasticsearch_client import ElasticsearchClient
@@ -31,11 +32,23 @@ def rollout_id():
 def elasticsearch_config():
     """Set up Elasticsearch and return configuration."""
     import time
+    import uuid
 
-    index_name = f"test-logs-{int(time.time())}"
+    # Use a more unique index name to avoid conflicts between tests
+    index_name = f"test-logs-{int(time.time())}-{uuid.uuid4().hex[:8]}"
     setup = ElasticsearchSetup()
     config = setup.setup_elasticsearch(index_name)
-    return config
+    yield config
+
+    # Clean up the index after the test
+    try:
+        # Create a client to clean up the index
+        from eval_protocol.log_utils.elasticsearch_client import ElasticsearchClient
+
+        client = ElasticsearchClient(config)
+        client.delete_index()
+    except Exception as e:
+        print(f"Warning: Failed to cleanup Elasticsearch index {index_name}: {e}")
 
 
 @pytest.fixture
@@ -77,10 +90,26 @@ def test_logger(elasticsearch_handler, elasticsearch_config, rollout_id: str):
     # Prevent propagation to avoid duplicate logs
     logger.propagate = False
 
-    return logger
+    yield logger
+
+    # Clean up the logger handlers after the test
+    logger.handlers.clear()
 
 
-@pytest.mark.skipif(os.environ.get("CI") == "true", reason="Only run this test locally (skipped in CI)")
+@pytest.fixture(autouse=True)
+def clear_elasticsearch_before_test(
+    elasticsearch_client: ElasticsearchClient, elasticsearch_config: ElasticsearchConfig
+):
+    """Clear Elasticsearch index before each test to ensure clean state."""
+    try:
+        # Clear all documents from the index before each test
+        success = elasticsearch_client.clear_index()
+        if not success:
+            print(f"Warning: Failed to clear Elasticsearch index {elasticsearch_config.index_name}")
+    except Exception as e:
+        print(f"Warning: Failed to clear Elasticsearch index before test: {e}")
+
+
 def test_elasticsearch_direct_http_handler_sends_logs(
     elasticsearch_client: ElasticsearchClient, test_logger: logging.Logger, rollout_id: str
 ):
@@ -130,7 +159,6 @@ def test_elasticsearch_direct_http_handler_sends_logs(
     print(f"Successfully verified log message in Elasticsearch: {test_message}")
 
 
-@pytest.mark.skipif(os.environ.get("CI") == "true", reason="Only run this test locally (skipped in CI)")
 def test_elasticsearch_direct_http_handler_sorts_logs_chronologically(
     elasticsearch_client: ElasticsearchClient, test_logger: logging.Logger, rollout_id: str
 ):
@@ -184,7 +212,6 @@ def test_elasticsearch_direct_http_handler_sorts_logs_chronologically(
     print(f"Timestamps in order: {found_timestamps}")
 
 
-@pytest.mark.skipif(os.environ.get("CI") == "true", reason="Only run this test locally (skipped in CI)")
 def test_elasticsearch_direct_http_handler_includes_rollout_id(
     elasticsearch_client: ElasticsearchClient, test_logger: logging.Logger, rollout_id: str
 ):
@@ -242,7 +269,6 @@ def test_elasticsearch_direct_http_handler_includes_rollout_id(
     print(f"Successfully verified log message with rollout_id '{rollout_id}' in Elasticsearch: {test_message}")
 
 
-@pytest.mark.skipif(os.environ.get("CI") == "true", reason="Only run this test locally (skipped in CI)")
 def test_elasticsearch_direct_http_handler_search_by_rollout_id(
     elasticsearch_client: ElasticsearchClient, test_logger: logging.Logger, rollout_id: str
 ):
@@ -311,7 +337,6 @@ def test_elasticsearch_direct_http_handler_search_by_rollout_id(
     print("Verified that search for different rollout_id returns 0 results")
 
 
-@pytest.mark.skipif(os.environ.get("CI") == "true", reason="Only run this test locally (skipped in CI)")
 def test_elasticsearch_direct_http_handler_logs_status_info(
     elasticsearch_client: ElasticsearchClient, test_logger: logging.Logger, rollout_id: str
 ):
@@ -377,7 +402,6 @@ def test_elasticsearch_direct_http_handler_logs_status_info(
     print(f"Successfully verified Status logging with code {test_status.code.value} in Elasticsearch: {test_message}")
 
 
-@pytest.mark.skipif(os.environ.get("CI") == "true", reason="Only run this test locally (skipped in CI)")
 def test_elasticsearch_direct_http_handler_search_by_status_code(
     elasticsearch_client: ElasticsearchClient, test_logger: logging.Logger, rollout_id: str
 ):
@@ -436,7 +460,6 @@ def test_elasticsearch_direct_http_handler_search_by_status_code(
     print(f"Successfully verified search by status code {running_status.value} found {len(hits)} log messages")
 
 
-@pytest.mark.skipif(os.environ.get("CI") == "true", reason="Only run this test locally (skipped in CI)")
 def test_elasticsearch_direct_http_handler_rollout_id_from_extra_overrides_env(
     elasticsearch_client: ElasticsearchClient, test_logger: logging.Logger, rollout_id: str
 ):
@@ -514,3 +537,90 @@ def test_elasticsearch_direct_http_handler_rollout_id_from_extra_overrides_env(
     )
 
     print(f"Successfully verified rollout_id override: extra '{extra_rollout_id}' overrode environment '{rollout_id}'")
+
+
+def test_elasticsearch_direct_http_handler_timestamp_format(
+    elasticsearch_client: ElasticsearchClient, test_logger: logging.Logger, rollout_id: str
+):
+    """Test that ElasticsearchDirectHttpHandler formats timestamps correctly with UTC timezone."""
+
+    # Generate a unique test message
+    test_message = f"Timestamp format test message at {time.time()}"
+
+    # Record the time before logging to compare with the timestamp
+    before_log_time = datetime.now(timezone.utc)
+
+    # Send the log message
+    test_logger.info(test_message)
+
+    # Record the time after logging
+    after_log_time = datetime.now(timezone.utc)
+
+    # Give Elasticsearch a moment to process the document
+    time.sleep(3)
+
+    # Search for the document using the client
+    search_results = elasticsearch_client.search_by_match("message", test_message, size=1)
+
+    # Assert that we found our log message
+    assert search_results is not None, "Search should return results"
+    assert "hits" in search_results, "Search response should contain 'hits'"
+    assert "total" in search_results["hits"], "Search hits should contain 'total'"
+
+    total_hits = search_results["hits"]["total"]
+    if isinstance(total_hits, dict):
+        # Elasticsearch 7+ format
+        total_count = total_hits["value"]
+    else:
+        # Elasticsearch 6 format
+        total_count = total_hits
+
+    assert total_count > 0, f"Expected to find at least 1 log message, but found {total_count}"
+
+    # Verify the content of the found document
+    hits = search_results["hits"]["hits"]
+    assert len(hits) > 0, "Expected at least one hit"
+
+    found_document = hits[0]["_source"]
+    assert "@timestamp" in found_document, "Expected document to contain '@timestamp' field"
+
+    # Get the timestamp from the document
+    timestamp_str = found_document["@timestamp"]
+
+    # Verify the timestamp format matches ISO 8601 with UTC timezone (Z suffix)
+    assert timestamp_str.endswith("Z"), f"Expected timestamp to end with 'Z' (UTC), got: {timestamp_str}"
+
+    # Parse the timestamp to verify it's valid
+    try:
+        parsed_timestamp = datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
+    except ValueError as e:
+        pytest.fail(f"Failed to parse timestamp '{timestamp_str}': {e}")
+
+    # Verify the timestamp is timezone-aware (UTC)
+    assert parsed_timestamp.tzinfo is not None, "Expected timestamp to be timezone-aware"
+    utc_offset = parsed_timestamp.tzinfo.utcoffset(None)
+    assert utc_offset is not None and utc_offset.total_seconds() == 0, "Expected timestamp to be in UTC timezone"
+
+    # Verify the timestamp is within reasonable bounds (between before and after log time)
+    # Allow for some margin due to processing time
+    from datetime import timedelta
+
+    time_margin = timedelta(seconds=5)  # 5 seconds margin
+    assert before_log_time - time_margin <= parsed_timestamp <= after_log_time + time_margin, (
+        f"Expected timestamp {parsed_timestamp} to be between {before_log_time} and {after_log_time} "
+        f"(with {time_margin} margin)"
+    )
+
+    # Verify the timestamp format includes microseconds
+    assert "." in timestamp_str, "Expected timestamp to include microseconds"
+    assert timestamp_str.count(".") == 1, "Expected timestamp to have exactly one decimal point"
+
+    # Verify the format matches the expected pattern: YYYY-MM-DDTHH:MM:SS.ffffffZ
+    import re
+
+    iso_pattern = r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$"
+    assert re.match(iso_pattern, timestamp_str), f"Expected timestamp to match ISO 8601 pattern, got: {timestamp_str}"
+
+    print(f"Successfully verified timestamp format: {timestamp_str}")
+    print(f"Parsed timestamp: {parsed_timestamp} (UTC)")
+    print(f"Timestamp is within expected time range: {before_log_time} <= {parsed_timestamp} <= {after_log_time}")
