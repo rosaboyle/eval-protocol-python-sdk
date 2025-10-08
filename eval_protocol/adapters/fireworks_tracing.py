@@ -371,9 +371,7 @@ class FireworksTracingAdapter(BaseAdapter):
                         error_msg = error_detail or e.response.text
 
                         # Retry on 404 if it's due to incomplete/missing traces (backend still indexing)
-                        if e.response.status_code == 404 and (
-                            "Incomplete traces" in error_detail or "No traces found" in error_detail
-                        ):
+                        if e.response.status_code == 404:
                             should_retry = True
                     except Exception:
                         error_msg = e.response.text
