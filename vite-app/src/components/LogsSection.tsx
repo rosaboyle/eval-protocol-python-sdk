@@ -121,7 +121,7 @@ export const LogsSection = observer(({ rolloutId }: LogsSectionProps) => {
   return (
     <div>
       {/* Content - matching MetadataSection container styling */}
-      <div className="border border-gray-200 p-2 w-[1200px] text-xs bg-white">
+      <div className="border border-gray-200 p-2 max-w-[1200px] text-xs bg-white">
         {/* Log level filter */}
         <div className="mb-2 flex items-center gap-2">
           <Select
@@ -160,7 +160,7 @@ export const LogsSection = observer(({ rolloutId }: LogsSectionProps) => {
         )}
 
         {logs.length > 0 && (
-          <div className="max-h-80 min-h-4 overflow-auto border border-gray-200">
+          <div className="max-h-[800px] min-h-4 overflow-auto border border-gray-200">
             <div>
               {logs.map((log, index) => (
                 <div
