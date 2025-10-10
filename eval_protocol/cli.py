@@ -303,7 +303,7 @@ def parse_args(args=None):
     logs_parser.add_argument("--debug", action="store_true", help="Enable debug mode")
     logs_parser.add_argument("--disable-elasticsearch-setup", action="store_true", help="Disable Elasticsearch setup")
     logs_parser.add_argument(
-        "--use-env-elasticsearch-confi",
+        "--use-env-elasticsearch-config",
         action="store_true",
         help="Use env vars for Elasticsearch config (requires ELASTICSEARCH_URL, ELASTICSEARCH_API_KEY, ELASTICSEARCH_INDEX_NAME)",
     )
