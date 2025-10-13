@@ -1,5 +1,7 @@
 name: Eval Protocol Rollout
 
+run-name: rollout:${{ inputs.rollout_id }}
+
 on:
   workflow_dispatch:
     inputs:
