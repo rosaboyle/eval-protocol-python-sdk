@@ -48,7 +48,6 @@ class InitRequest(BaseModel):
         default_factory=dict,
         description="Completion parameters including model and optional model_kwargs, temperature, etc.",
     )
-    elastic_search_config: Optional[ElasticsearchConfig] = None
     messages: Optional[List[Message]] = None
     tools: Optional[List[Dict[str, Any]]] = None
 
@@ -60,6 +59,7 @@ class InitRequest(BaseModel):
     """
 
     metadata: RolloutMetadata
+    api_key: Optional[str] = None
 
 
 class StatusResponse(BaseModel):
