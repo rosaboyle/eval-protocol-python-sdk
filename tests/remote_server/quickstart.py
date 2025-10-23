@@ -47,7 +47,7 @@ async def test_remote_rollout_and_fetch_fireworks(row: EvaluationRow) -> Evaluat
     End-to-end test with Vercel production server:
     - Uses deployed Vercel serverless function (no manual startup needed)
     - trigger remote rollout via RemoteRolloutProcessor (calls init/status)
-    - fetch traces from Langfuse via Fireworks tracing proxy (uses default FireworksTracingAdapter)
+    - fetch traces from Fireworks tracing (uses default FireworksTracingAdapter)
     - FAIL if no traces found or rollout_id missing
     """
     assert row.messages[0].content == "What is the capital of France?", "Row should have correct message content"

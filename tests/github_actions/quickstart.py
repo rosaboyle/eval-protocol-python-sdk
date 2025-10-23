@@ -14,14 +14,18 @@ from typing import List
 import pytest
 
 from eval_protocol.data_loader.dynamic_data_loader import DynamicDataLoader
-from eval_protocol.models import EvaluationRow, Message
+from eval_protocol.models import EvaluationRow, InputMetadata
 from eval_protocol.pytest import evaluation_test
 from eval_protocol.pytest.github_action_rollout_processor import GithubActionRolloutProcessor
 
 
 def rows() -> List[EvaluationRow]:
-    row = EvaluationRow(messages=[Message(role="user", content="What is the capital of France?")])
-    return [row, row, row]
+    return [
+        EvaluationRow(input_metadata=InputMetadata(row_id=str(i)))
+        for i in range(
+            3
+        )  # In this example we use index to associate rows. Dataset is assumed to be accessible to the worker.
+    ]
 
 
 @pytest.mark.skipif(os.environ.get("CI") == "true", reason="Only run this test locally (skipped in CI)")
