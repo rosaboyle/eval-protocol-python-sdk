@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       completion_params:
-        description: 'JSON completion params (optional, includes model_kwargs)'
+        description: 'JSON completion params'
         required: true
         type: string
       metadata:
@@ -15,6 +15,10 @@ on:
         type: string
       model_base_url:
         description: 'Base URL for the model API'
+        required: true
+        type: string
+      api_key:
+        description: 'API key for the model API'
         required: true
         type: string
 
@@ -37,11 +41,9 @@ jobs:
           pip install openai
 
       - name: Run rollout script
-        env:
-          FIREWORKS_API_KEY: ${{ secrets.FIREWORKS_API_KEY }}
         run: |
           python rollout_worker.py \
             --completion-params '${{ inputs.completion_params }}' \
             --metadata '${{ inputs.metadata }}' \
             --model-base-url "${{ inputs.model_base_url }}" \
-            --api-key "${{ secrets.FIREWORKS_API_KEY }}"
+            --api-key "${{ inputs.api_key }}"

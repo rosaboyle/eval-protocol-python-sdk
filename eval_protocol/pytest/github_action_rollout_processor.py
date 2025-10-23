@@ -19,7 +19,7 @@ class GithubActionRolloutProcessor(RolloutProcessor):
     Rollout processor that dispatches and monitors a GitHub Actions workflow per evaluation row.
 
     Expected GitHub Actions workflow:
-    - Workflow dispatch with inputs: model, metadata (JSON), model_base_url
+    - Workflow dispatch with inputs: completion_params, metadata (JSON), model_base_url, api_key
     - Workflow makes API calls that get traced (e.g., via Fireworks tracing proxy)
     - Traces are fetched later via output_data_loader using rollout_id tags
 
@@ -88,15 +88,13 @@ class GithubActionRolloutProcessor(RolloutProcessor):
             def _dispatch_workflow():
                 url = f"https://api.github.com/repos/{self.owner}/{self.repo}/actions/workflows/{self.workflow_id}/dispatches"
 
-                model = init_request.completion_params.get("model")
-                if not model:
-                    raise ValueError("model is required in completion_params")
                 payload = {
                     "ref": self.ref,
                     "inputs": {
                         "completion_params": json.dumps(init_request.completion_params),
                         "metadata": init_request.metadata.model_dump_json(),
                         "model_base_url": init_request.model_base_url,
+                        "api_key": init_request.api_key,
                     },
                 }
                 r = requests.post(url, json=payload, headers=self._headers(), timeout=30)
