@@ -42,7 +42,7 @@ jobs:
 
       - name: Run rollout script
         run: |
-          python rollout_worker.py \
+          python tests/github_actions/rollout_worker.py \
             --completion-params '${{ inputs.completion_params }}' \
             --metadata '${{ inputs.metadata }}' \
             --model-base-url "${{ inputs.model_base_url }}" \
