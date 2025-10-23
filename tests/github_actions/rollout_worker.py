@@ -20,6 +20,7 @@ def main():
     parser.add_argument("--completion-params", required=True, help="JSON completion params (includes model)")
     parser.add_argument("--metadata", required=True, help="JSON serialized metadata object")
     parser.add_argument("--model-base-url", required=True, help="Base URL for the model API")
+    parser.add_argument("--api-key", required=True, help="API key for the model API")
 
     args = parser.parse_args()
 
@@ -44,6 +45,8 @@ def main():
     rollout_id = metadata["rollout_id"]
     row_id = metadata["row_id"]
 
+    api_key = args.api_key
+
     print(f"🚀 Starting rollout {rollout_id}")
     print(f"   Model: {model}")
     print(f"   Row ID: {row_id}")
@@ -63,7 +66,7 @@ def main():
         # Build completion kwargs from completion_params
         completion_kwargs = {"messages": messages, **completion_params}
 
-        client = OpenAI(base_url=args.model_base_url, api_key=os.environ.get("FIREWORKS_API_KEY"))
+        client = OpenAI(base_url=args.model_base_url, api_key=api_key)
 
         print("📡 Calling OpenAI completion...")
         print(f"   Completion kwargs: {completion_kwargs}")
