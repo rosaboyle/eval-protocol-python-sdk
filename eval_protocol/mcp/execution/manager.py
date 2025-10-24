@@ -504,7 +504,7 @@ class ExecutionManager:
                             )
 
                     logger.info(
-                        f"🏁 Environmnet indicates rollout {rollout_idx} terminated at step {step} (reward: {trajectory.total_reward}) in thread {threading.current_thread().name}"
+                        f"🏁 Environment indicates rollout {rollout_idx} terminated at step {step} (reward: {trajectory.total_reward}) in thread {threading.current_thread().name}"
                     )
                     break
 
