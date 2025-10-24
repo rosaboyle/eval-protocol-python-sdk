@@ -53,7 +53,7 @@ def huggingface_dataset_to_jsonl(
         Path to the generated JSONL file
     """
     try:
-        from datasets import load_dataset
+        from datasets import load_dataset  # pyright: ignore[reportAttributeAccessIssue]
     except ImportError:
         raise ImportError(
             "The 'datasets' package is required to use this function. "
@@ -197,9 +197,18 @@ class Evaluator:
             # If ts_mode_config is active, it takes precedence for code definition.
             # The multi_metrics flag passed to __init__ is for folder-based loading if ts_mode_config is not used.
 
+    def _should_include_file(self, filename: str) -> bool:
+        """Check if a file should be included in the evaluator upload."""
+        return (
+            filename.endswith(".py")
+            or filename.endswith(".txt")
+            or filename.endswith(".toml")
+            or os.path.basename(filename) == "Dockerfile"
+        )
+
     def _load_python_files_from_folder(self, folder_path: str) -> Dict[str, str]:
         """
-        Recursively loads all Python files from a given folder (excluding common ignored dirs).
+        Recursively loads Python, text, and TOML files from a given folder (excluding common ignored dirs).
 
         Args:
             folder_path: Absolute path to the folder.
@@ -223,7 +232,7 @@ class Evaluator:
             # prune ignored directories
             dirnames[:] = [d for d in dirnames if d not in ignored_dirs and not d.startswith(".")]
             for name in filenames:
-                if not name.endswith(".py"):
+                if not self._should_include_file(name):
                     continue
                 abs_path = Path(dirpath) / name
                 rel_path = str(abs_path.relative_to(base_path))
@@ -231,7 +240,7 @@ class Evaluator:
                     content = f.read()
                 files[rel_path] = content
         if not files:
-            raise ValueError(f"No Python files found in {folder_path}")
+            raise ValueError(f"No Python, text, or TOML files found in {folder_path}")
         return files
 
     def load_metric_folder(self, metric_name, folder_path):
@@ -300,7 +309,7 @@ class Evaluator:
         for filename, content in files.items():
             self.code_files[f"{metric_name}/{filename}"] = content
 
-        logger.info(f"Loaded {len(files)} Python files for metric '{metric_name}' from {folder_path}")
+        logger.info(f"Loaded {len(files)} files for metric '{metric_name}' from {folder_path}")
         return files
 
     def load_multi_metrics_folder(self, folder_path):
@@ -317,7 +326,7 @@ class Evaluator:
         files = self._load_python_files_from_folder(folder_path)
 
         self.code_files = files
-        logger.info(f"Loaded {len(files)} Python files from {folder_path} for multi-metrics evaluation")
+        logger.info(f"Loaded {len(files)} files from {folder_path} for multi-metrics evaluation")
         return files
 
     def load_samples_from_jsonl(self, sample_file, max_samples=5):
@@ -679,11 +688,12 @@ def evaluate(messages, ground_truth: Optional[Union[str, List[Dict[str, Any]]]] 
         elif self.multi_metrics:
             file_contents = {}
             for filename, content in self.code_files.items():
-                if not filename.endswith(".py"):
-                    continue
-                file_contents[filename] = self._update_evaluate_signature(content)
+                if filename.endswith(".py"):
+                    file_contents[filename] = self._update_evaluate_signature(content)
+                elif self._should_include_file(filename) and not filename.endswith(".py"):
+                    file_contents[filename] = content
             if not file_contents:
-                raise ValueError("No Python files found for multi-metrics mode.")
+                raise ValueError("No files found for multi-metrics mode.")
             # Determine entry file from entry_point if provided; otherwise detect
             entry_file = None
             if self.entry_point and "::" in self.entry_point:
@@ -737,14 +747,15 @@ def evaluate(messages, ground_truth: Optional[Union[str, List[Dict[str, Any]]]] 
                 file_contents = {}
                 # Include all discovered files for this metric folder, preserving filenames
                 for filename, content in self.code_files.items():
-                    if filename.startswith(f"{metric_name}/") and filename.endswith(".py"):
+                    if filename.startswith(f"{metric_name}/"):
                         # Use the file name within the metric folder for clarity
                         short_name = filename.split(f"{metric_name}/", 1)[1]
-                        file_contents[short_name] = self._update_evaluate_signature(content)
+                        if filename.endswith(".py"):
+                            file_contents[short_name] = self._update_evaluate_signature(content)
+                        elif self._should_include_file(filename) and not filename.endswith(".py"):
+                            file_contents[short_name] = content
                 if not file_contents:
-                    logger.warning(
-                        f"No Python files prepared for metric '{metric_name}', skipping this metric for criteria."
-                    )
+                    logger.warning(f"No files prepared for metric '{metric_name}', skipping this metric for criteria.")
                     continue
                 # Determine entry file within this metric's files using entry_point if present
                 entry_file = None
