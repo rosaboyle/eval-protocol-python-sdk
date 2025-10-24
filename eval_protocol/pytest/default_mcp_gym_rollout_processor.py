@@ -199,9 +199,9 @@ class MCPServerManager:
 
 class MCPGymRolloutProcessor(RolloutProcessor):
     """
-    Rollout processor for tau bench environments.
+    Rollout processor for MCP gym environments.
 
-    This processor starts an MCP server, creates tau bench environments, and returns rollout tasks
+    This processor starts an MCP server, creates an environment, and returns rollout tasks
     using the eval_protocol framework with proper cleanup handling.
     """
 

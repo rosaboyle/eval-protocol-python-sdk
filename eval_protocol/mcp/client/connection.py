@@ -53,26 +53,16 @@ class MCPConnectionManager:
 
         exit_stack = AsyncExitStack()
 
-        # Attach client metadata for the server to consume (session_id, seed, config, etc.).
-        # The server inspects a private `_extra` dict on client_info, so we populate it here.
-        client_info = Implementation(name="reward-kit", version="1.0.0")
-        extra_data: Dict[str, Any] = {"session_id": session.session_id}
+        client_info = Implementation(name="reward-kit", version="1.0.0", _extra={})  # pyright: ignore[reportCallIssue]
+        client_info._extra["session_id"] = session.session_id  # pyright: ignore[reportAttributeAccessIssue]
         if session.seed is not None:
-            extra_data["seed"] = session.seed
+            client_info._extra["seed"] = session.seed  # pyright: ignore[reportAttributeAccessIssue]
         if session.dataset_row and session.dataset_row.environment_context:
-            extra_data["config"] = session.dataset_row.environment_context
+            client_info._extra["config"] = session.dataset_row.environment_context  # pyright: ignore[reportAttributeAccessIssue]
         if session.dataset_row and session.dataset_row.id:
-            extra_data["dataset_row_id"] = session.dataset_row.id
+            client_info._extra["dataset_row_id"] = session.dataset_row.id  # pyright: ignore[reportAttributeAccessIssue]
         if session.model_id:
-            extra_data["model_id"] = session.model_id
-
-        # Merge with any existing _extra dict instead of overwriting
-        existing_extra = getattr(client_info, "_extra", None)
-        merged_extra: Dict[str, Any] = {}
-        if isinstance(existing_extra, dict):
-            merged_extra.update(existing_extra)
-        merged_extra.update(extra_data)
-        setattr(client_info, "_extra", merged_extra)
+            client_info._extra["model_id"] = session.model_id  # pyright: ignore[reportAttributeAccessIssue]
 
         read_stream, write_stream, _ = await exit_stack.enter_async_context(
             streamablehttp_client(session.base_url, terminate_on_close=True)
