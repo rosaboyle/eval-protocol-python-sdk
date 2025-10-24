@@ -8,6 +8,7 @@ The SVG evaluation logic remains in the test client.
 import json
 import os
 import logging
+import sys
 from http.server import BaseHTTPRequestHandler
 from openai import OpenAI
 from dotenv import load_dotenv
@@ -16,9 +17,32 @@ from eval_protocol import Status, InitRequest, FireworksTracingHttpHandler, Roll
 
 load_dotenv()
 
-# Attach Fireworks tracing handler to root logger
-fireworks_handler = FireworksTracingHttpHandler()
-logging.getLogger().addHandler(fireworks_handler)
+# Configure logging so INFO and below go to stdout, WARNING+ to stderr.
+# This avoids Vercel marking INFO logs as [error] (stderr).
+root_logger = logging.getLogger()
+root_logger.handlers.clear()
+root_logger.setLevel(logging.INFO)
+
+
+class _InfoOnly(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        return record.levelno <= logging.INFO
+
+
+formatter = logging.Formatter("%(levelname)s:%(name)s:%(message)s")
+
+stdout_handler = logging.StreamHandler(sys.stdout)
+stdout_handler.addFilter(_InfoOnly())
+stdout_handler.setFormatter(formatter)
+root_logger.addHandler(stdout_handler)
+
+stderr_handler = logging.StreamHandler(sys.stderr)
+stderr_handler.setLevel(logging.WARNING)
+stderr_handler.setFormatter(formatter)
+root_logger.addHandler(stderr_handler)
+
+# Attach Fireworks tracing handler to root logger (non-stream HTTP sink)
+root_logger.addHandler(FireworksTracingHttpHandler())
 
 
 class handler(BaseHTTPRequestHandler):
@@ -46,18 +70,14 @@ class handler(BaseHTTPRequestHandler):
             # Prepare completion arguments
             completion_kwargs = {
                 "messages": req.messages,
-                **req.completion_params,
+                "model": req.completion_params.get("model"),
+                "temperature": req.completion_params.get("temperature"),
+                "max_tokens": req.completion_params.get("max_tokens"),
             }
 
             # Add tools if present
             if req.tools:
                 completion_kwargs["tools"] = req.tools
-
-            # Add completion parameters if they exist
-            # if hasattr(req, 'completion_params') and req.completion_params:
-            #     # Filter out any model override
-            #     params = {k: v for k, v in req.completion_params.items() if k != 'model'}
-            #     completion_kwargs.update(params)
 
             # Get API key (prefer request api_key, fallback to environment)
             api_key = req.api_key or os.environ.get("FIREWORKS_API_KEY")
