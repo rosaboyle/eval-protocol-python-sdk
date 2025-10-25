@@ -67,10 +67,14 @@ class handler(BaseHTTPRequestHandler):
                 self._send_error(400, error_msg)
                 return
 
+            model = req.completion_params.get("model")
+            if model and isinstance(model, str) and model.startswith("fireworks_ai/"):
+                model = model[len("fireworks_ai/") :]
+
             # Prepare completion arguments
             completion_kwargs = {
                 "messages": req.messages,
-                "model": req.completion_params.get("model"),
+                "model": model,
                 "temperature": req.completion_params.get("temperature"),
                 "max_tokens": req.completion_params.get("max_tokens"),
             }
