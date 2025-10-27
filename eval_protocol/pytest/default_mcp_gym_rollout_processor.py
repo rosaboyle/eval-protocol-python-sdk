@@ -4,15 +4,16 @@ import os
 import signal
 import socket
 import subprocess
+import threading
 import time
 from pathlib import Path
 from typing import List, Optional
 
 import eval_protocol as ep
+from eval_protocol.mcp.execution.manager import ExecutionManager
 from eval_protocol.models import EvaluationRow
 from eval_protocol.pytest.rollout_processor import RolloutProcessor
 from eval_protocol.pytest.types import RolloutProcessorConfig
-from eval_protocol.mcp.execution.manager import ExecutionManager
 
 
 class MCPServerManager:
@@ -181,8 +182,9 @@ class MCPServerManager:
     def _register_cleanup_handlers(cls):
         """Register cleanup handlers - called only once"""
         atexit.register(cls._cleanup_all_servers)
-        signal.signal(signal.SIGINT, cls._signal_handler)  # Ctrl+C
-        signal.signal(signal.SIGTERM, cls._signal_handler)  # Termination signal
+        if threading.current_thread() is threading.main_thread():
+            signal.signal(signal.SIGINT, cls._signal_handler)  # Ctrl+C
+            signal.signal(signal.SIGTERM, cls._signal_handler)  # Termination signal
 
     def __enter__(self):
         """Context manager entry"""
@@ -223,28 +225,6 @@ class MCPGymRolloutProcessor(RolloutProcessor):
             try:
                 self.server.start()
 
-                model_id = str(
-                    (config.completion_params.get("model") if config.completion_params else None) or "gpt-4o-mini"
-                )
-                temperature = config.completion_params.get("temperature", 0.0)
-                max_tokens = config.completion_params.get("max_tokens", 4096)
-
-                # Pass all other completion_params (e.g. stream=True) via kwargs
-                other_params = {
-                    k: v
-                    for k, v in (config.completion_params or {}).items()
-                    if k not in ["model", "temperature", "max_tokens", "extra_body"]
-                }
-                extra_body = config.completion_params.get("extra_body", {}) or {}
-
-                self.policy = ep.LiteLLMPolicy(
-                    model_id=model_id,
-                    temperature=temperature,
-                    max_tokens=max_tokens,
-                    **extra_body,
-                    **other_params,
-                )
-
             except Exception as e:
                 if self.server:
                     self.server.stop()
@@ -254,13 +234,31 @@ class MCPGymRolloutProcessor(RolloutProcessor):
 
         else:
             # Reuse existing MCP environments for retry
-            if not self.server or not self.policy:
+            if not self.server:
                 raise RuntimeError(
                     "Cannot retry without existing server/environments. Call with start_server=True first."
                 )
 
+        model_id = str((config.completion_params.get("model") if config.completion_params else None) or "gpt-4o-mini")
+        temperature = config.completion_params.get("temperature", 0.0)
+        max_tokens = config.completion_params.get("max_tokens", 4096)
+
+        # Pass all other completion_params (e.g. stream=True) via kwargs
+        other_params = {
+            k: v
+            for k, v in (config.completion_params or {}).items()
+            if k not in ["model", "temperature", "max_tokens", "extra_body"]
+        }
+        extra_body = config.completion_params.get("extra_body", {}) or {}
+
+        self.policy = ep.LiteLLMPolicy(
+            model_id=model_id,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            **extra_body,
+            **other_params,
+        )
         # Create MCP environments directly from evaluation_rows
-        assert self.policy is not None, "Policy must be initialized before rollout"
         envs = ep.make(
             "http://localhost:9700/mcp/",
             evaluation_rows=rows,
