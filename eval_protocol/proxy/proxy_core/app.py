@@ -208,6 +208,7 @@ def create_app(
         encoded_base_url: Optional[str] = None,
         config: ProxyConfig = Depends(get_config),
         redis_client: redis.Redis = Depends(get_redis),
+        _: None = Depends(require_auth),
     ):
         params = ChatParams(
             project_id=project_id,
@@ -232,6 +233,7 @@ def create_app(
         request: Request,
         config: ProxyConfig = Depends(get_config),
         redis_client: redis.Redis = Depends(get_redis),
+        _: None = Depends(require_auth),
     ):
         params = ChatParams(project_id=project_id)
         return await handle_chat_completion(
