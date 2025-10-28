@@ -122,9 +122,7 @@ def build_init_request(
 
     # Build final model base URL with tracing metadata
     final_model_base_url = model_base_url
-    if model_base_url and (
-        model_base_url.startswith("https://tracing.fireworks.ai") or model_base_url.startswith("http://localhost")
-    ):
+    if model_base_url and ("tracing.fireworks.ai" in model_base_url or model_base_url.startswith("http://localhost")):
         final_model_base_url = build_fireworks_tracing_url(model_base_url, meta, completion_params_base_url)
 
     # Extract API key from environment or completion_params
