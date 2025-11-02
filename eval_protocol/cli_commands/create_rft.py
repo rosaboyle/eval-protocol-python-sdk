@@ -13,6 +13,7 @@ from ..auth import (
 )
 from ..fireworks_rft import (
     _map_api_host_to_app_host,
+    build_default_output_model,
     create_dataset_from_jsonl,
     create_reinforcement_fine_tuning_job,
 )
@@ -467,6 +468,10 @@ def create_rft_command(args) -> int:
         body["evaluationDataset"] = args.evaluation_dataset
     if getattr(args, "output_model", None):
         body.setdefault("trainingConfig", {})["outputModel"] = f"accounts/{account_id}/models/{args.output_model}"
+    else:
+        # Auto-generate output model name if not provided
+        auto_output_model = build_default_output_model(evaluator_id)
+        body.setdefault("trainingConfig", {})["outputModel"] = f"accounts/{account_id}/models/{auto_output_model}"
 
     # Clean None fields to avoid noisy payloads
     body = {k: v for k, v in body.items() if v is not None}
