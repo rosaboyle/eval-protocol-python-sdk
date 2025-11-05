@@ -713,6 +713,11 @@ def evaluation_test(
             test_func, mode, max_concurrent_rollouts, max_concurrent_evaluations, pytest_wrapper
         )
 
+        # Make this pytest discoverable regardless of pytest configuration. So
+        # you can name your eval whatever you want, as long as it's decorated
+        # with @evaluation_test.
+        dual_mode_wrapper.__test__ = True
+
         return dual_mode_wrapper  # pyright: ignore[reportReturnType, reportUnknownVariableType]
 
     return decorator
