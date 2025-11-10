@@ -395,7 +395,7 @@ def parse_args(args=None):
     rft_parser.add_argument("--base-model", help="Base model resource id")
     rft_parser.add_argument("--warm-start-from", help="Addon model to warm start from")
     rft_parser.add_argument("--output-model", help="Output model id (defaults from evaluator)")
-    rft_parser.add_argument("--epochs", type=int, default=8)
+    rft_parser.add_argument("--epochs", type=int, default=1)
     rft_parser.add_argument("--batch-size", type=int, default=128000)
     rft_parser.add_argument("--learning-rate", type=float, default=3e-5)
     rft_parser.add_argument("--max-context-length", type=int, default=65536)
