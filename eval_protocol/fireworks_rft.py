@@ -5,6 +5,7 @@ import os
 import sys
 import tempfile
 import time
+import uuid
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, Optional, Tuple
 
@@ -35,25 +36,6 @@ def _map_api_host_to_app_host(api_base: str) -> str:
         return f"{scheme}://{host}"
     except Exception:
         return "https://app.fireworks.ai"
-
-
-def load_evaluator_trace(project_root: str, evaluator_id: str) -> Optional[Dict[str, Any]]:
-    trace_path = Path(project_root) / ".eval_protocol" / "evaluators" / f"{evaluator_id}.json"
-    if not trace_path.exists():
-        return None
-    try:
-        with open(trace_path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return None
-
-
-def save_evaluator_trace(project_root: str, evaluator_id: str, trace: Dict[str, Any]) -> None:
-    base_dir = Path(project_root) / ".eval_protocol" / "evaluators"
-    base_dir.mkdir(parents=True, exist_ok=True)
-    trace_path = base_dir / f"{evaluator_id}.json"
-    with open(trace_path, "w", encoding="utf-8") as f:
-        json.dump(trace, f, indent=2, ensure_ascii=False)
 
 
 def detect_dataset_builder(metric_dir: str) -> Optional[str]:
@@ -224,12 +206,11 @@ def build_default_dataset_id(evaluator_id: str) -> str:
 
 def build_default_output_model(evaluator_id: str) -> str:
     base = evaluator_id.lower().replace("_", "-")
-    return f"{base}-rft"
+    uuid_suffix = str(uuid.uuid4())[:4]
+    return f"{base}-rft-{uuid_suffix}"
 
 
 __all__ = [
-    "load_evaluator_trace",
-    "save_evaluator_trace",
     "detect_dataset_builder",
     "materialize_dataset_via_builder",
     "create_dataset_from_jsonl",
