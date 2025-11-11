@@ -552,6 +552,23 @@ def _load_secrets_from_env_file(env_file_path: str) -> Dict[str, str]:
     return secrets
 
 
+def _mask_secret_value(value: str) -> str:
+    """
+    Return a masked representation of a secret showing only a small prefix/suffix.
+    Example: fw_3Z*******Xgnk
+    """
+    try:
+        if not isinstance(value, str) or not value:
+            return "<empty>"
+        prefix_len = 6
+        suffix_len = 4
+        if len(value) <= prefix_len + suffix_len:
+            return value[0] + "***" + value[-1]
+        return f"{value[:prefix_len]}***{value[-suffix_len:]}"
+    except Exception:
+        return "<masked>"
+
+
 def upload_command(args: argparse.Namespace) -> int:
     root = os.path.abspath(getattr(args, "path", "."))
     entries_arg = getattr(args, "entry", None)
@@ -622,7 +639,11 @@ def upload_command(args: argparse.Namespace) -> int:
                 print(f"Loading secrets from: {env_file_path}")
 
             for secret_name, secret_value in secrets_from_file.items():
-                print(f"Ensuring {secret_name} is registered as a secret on Fireworks for rollout...")
+                source = ".env" if secret_name in secrets_from_env_file else "environment"
+                print(
+                    f"Ensuring {secret_name} is registered as a secret on Fireworks for rollout... "
+                    f"({source}: {_mask_secret_value(secret_value)})"
+                )
                 if create_or_update_fireworks_secret(
                     account_id=fw_account_id,
                     key_name=secret_name,
