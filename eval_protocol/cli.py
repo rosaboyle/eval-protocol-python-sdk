@@ -427,6 +427,37 @@ def parse_args(args=None):
     rft_parser.add_argument("--dry-run", action="store_true", help="Print planned REST calls without sending")
     rft_parser.add_argument("--force", action="store_true", help="Overwrite existing evaluator with the same ID")
 
+    # Local test command
+    local_test_parser = subparsers.add_parser(
+        "local-test",
+        help="Select an evaluation test and run it locally. If a Dockerfile exists, build and run via Docker; otherwise run on host.",
+    )
+    local_test_parser.add_argument(
+        "--entry",
+        help="Entrypoint to run (path::function or path). If not provided, a selector will be shown (unless --yes).",
+    )
+    local_test_parser.add_argument(
+        "--ignore-docker",
+        action="store_true",
+        help="Ignore Dockerfile even if present; run pytest on host",
+    )
+    local_test_parser.add_argument(
+        "--yes",
+        "-y",
+        action="store_true",
+        help="Non-interactive: if multiple tests exist and no --entry, fails with guidance",
+    )
+    local_test_parser.add_argument(
+        "--docker-build-extra",
+        default="",
+        help="Extra flags to pass to 'docker build' (quoted string, e.g. \"--no-cache --pull --progress=plain\")",
+    )
+    local_test_parser.add_argument(
+        "--docker-run-extra",
+        default="",
+        help="Extra flags to pass to 'docker run' (quoted string, e.g. \"--env-file .env --memory=8g\")",
+    )
+
     # Run command (for Hydra-based evaluations)
     # This subparser intentionally defines no arguments itself.
     # All arguments after 'run' will be passed to Hydra by parse_known_args.
@@ -559,6 +590,10 @@ def main():
             return create_rft_command(args)
         print("Error: missing subcommand for 'create'. Try: eval-protocol create rft")
         return 1
+    elif args.command == "local-test":
+        from .cli_commands.local_test import local_test_command
+
+        return local_test_command(args)
     elif args.command == "run":
         # For the 'run' command, Hydra takes over argument parsing.
 
