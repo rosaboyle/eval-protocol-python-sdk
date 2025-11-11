@@ -3,9 +3,7 @@
 [![PyPI - Version](https://img.shields.io/pypi/v/eval-protocol)](https://pypi.org/project/eval-protocol/)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/eval-protocol/python-sdk)
 
-**Stop guessing which AI model to use. Build a data-driven model leaderboard.**
-
-With hundreds of models and configs, you need objective data to choose the right one for your use case. EP helps you evaluate real traces, compare models, and visualize results locally.
+**The open-source framework to help you write evals for RL.**
 
 ## 🚀 Features
 
