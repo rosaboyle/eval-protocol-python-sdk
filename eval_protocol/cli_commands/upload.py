@@ -602,9 +602,9 @@ def upload_command(args: argparse.Namespace) -> int:
         secrets_from_file = _load_secrets_from_env_file(env_file_path)
         secrets_from_env_file = secrets_from_file.copy()  # Track what came from .env file
 
-        # Also ensure FIREWORKS_API_KEY from environment is included
+        # Also consider FIREWORKS_API_KEY from environment, but prefer .env value
         fw_api_key_value = get_fireworks_api_key()
-        if fw_api_key_value:
+        if fw_api_key_value and "FIREWORKS_API_KEY" not in secrets_from_file:
             secrets_from_file["FIREWORKS_API_KEY"] = fw_api_key_value
 
         if not fw_account_id and fw_api_key_value:
