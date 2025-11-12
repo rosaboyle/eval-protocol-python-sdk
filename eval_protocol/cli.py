@@ -407,7 +407,7 @@ def parse_args(args=None):
     rft_parser.add_argument("--eval-auto-carveout", dest="eval_auto_carveout", action="store_true", default=True)
     rft_parser.add_argument("--no-eval-auto-carveout", dest="eval_auto_carveout", action="store_false")
     # Rollout chunking
-    rft_parser.add_argument("--chunk-size", type=int, default=10, help="Data chunk size for rollout batching")
+    rft_parser.add_argument("--chunk-size", type=int, default=100, help="Data chunk size for rollout batching")
     # Inference params
     rft_parser.add_argument("--temperature", type=float)
     rft_parser.add_argument("--top-p", type=float)
