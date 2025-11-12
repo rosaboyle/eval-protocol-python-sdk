@@ -15,6 +15,142 @@ def _write_json(path: str, data: dict) -> None:
         json.dump(data, f)
 
 
+def test_create_rft_passes_all_flags_into_request_body(tmp_path, monkeypatch):
+    # Isolate HOME and CWD
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    project = tmp_path / "proj"
+    project.mkdir()
+    monkeypatch.chdir(project)
+
+    # Environment required by command
+    monkeypatch.setenv("FIREWORKS_API_KEY", "fw_dummy")
+    monkeypatch.setenv("FIREWORKS_ACCOUNT_ID", "acct123")
+    monkeypatch.setenv("FIREWORKS_API_BASE", "https://api.fireworks.ai")
+
+    # Provide dataset via --dataset-jsonl
+    ds_path = project / "dataset.jsonl"
+    ds_path.write_text('{"input":"x"}\n', encoding="utf-8")
+
+    # Skip upload: pretend evaluator exists and is ACTIVE
+    class _Resp:
+        ok = True
+
+        def json(self):
+            return {"state": "ACTIVE"}
+
+        def raise_for_status(self):
+            return None
+
+    monkeypatch.setattr(cr.requests, "get", lambda *a, **k: _Resp())
+
+    # Capture dataset creation inputs but let it succeed
+    monkeypatch.setattr(
+        cr,
+        "create_dataset_from_jsonl",
+        lambda account_id, api_key, api_base, dataset_id, display_name, jsonl_path: (
+            dataset_id,
+            {"name": f"accounts/{account_id}/datasets/{dataset_id}", "state": "UPLOADING"},
+        ),
+    )
+
+    captured = {"body": None}
+
+    def _fake_create_job(account_id, api_key, api_base, body):
+        captured["body"] = body
+        return {"name": f"accounts/{account_id}/reinforcementFineTuningJobs/xyz"}
+
+    monkeypatch.setattr(cr, "create_reinforcement_fine_tuning_job", _fake_create_job)
+
+    import argparse
+
+    args = argparse.Namespace(
+        # Evaluator and dataset
+        evaluator_id="my-evaluator",
+        dataset_id=None,
+        dataset_jsonl=str(ds_path),
+        dataset_display_name="My Dataset",
+        dataset_builder=None,
+        # Modes
+        yes=True,
+        dry_run=False,
+        force=False,
+        env_file=None,
+        # Model selection (exactly one)
+        base_model="accounts/fireworks/models/llama-v3p1-8b-instruct",
+        warm_start_from=None,
+        output_model="my-output-model",
+        # Training config
+        epochs=3,
+        batch_size=65536,
+        learning_rate=5e-5,
+        lora_rank=32,
+        max_context_length=131072,
+        accelerator_count=4,
+        region="us-east4",
+        # Inference params
+        temperature=0.9,
+        top_p=0.95,
+        top_k=50,
+        max_tokens=4096,
+        n=6,
+        inference_extra_body='{"foo":"bar"}',
+        # Rollout chunking and eval carveout
+        chunk_size=250,
+        eval_auto_carveout=False,  # explicitly disabled via --no-eval-auto-carveout
+        evaluation_dataset="accounts/acct123/datasets/eval-ds",
+        # W&B
+        wandb_enabled=True,
+        wandb_project="proj",
+        wandb_entity="ent",
+        wandb_run_id="run123",
+        wandb_api_key="key123",
+        # Unused in body but accepted by parser
+        rft_job_id=None,
+        display_name=None,
+    )
+
+    rc = cr.create_rft_command(args)
+    assert rc == 0
+    assert captured["body"] is not None
+    body = captured["body"]
+
+    # Top-level fields
+    assert body["dataset"].endswith("/datasets/" + body["dataset"].split("/")[-1])
+    assert body["evaluator"].endswith("/evaluators/my-evaluator")
+    assert body["chunkSize"] == 250
+    assert body["evalAutoCarveout"] is False
+    assert body["evaluationDataset"] == "accounts/acct123/datasets/eval-ds"
+
+    # Training config mapping
+    tc = body["trainingConfig"]
+    assert tc["baseModel"] == "accounts/fireworks/models/llama-v3p1-8b-instruct"
+    assert tc["outputModel"] == "accounts/acct123/models/my-output-model"
+    assert tc["epochs"] == 3
+    assert tc["batchSize"] == 65536
+    assert abs(tc["learningRate"] - 5e-5) < 1e-12
+    assert tc["loraRank"] == 32
+    assert tc["maxContextLength"] == 131072
+    assert tc["acceleratorCount"] == 4
+    assert tc["region"] == "us-east4"
+
+    # Inference params mapping
+    ip = body["inferenceParameters"]
+    assert abs(ip["temperature"] - 0.9) < 1e-12
+    assert abs(ip["topP"] - 0.95) < 1e-12
+    assert ip["topK"] == 50
+    assert ip["maxTokens"] == 4096
+    assert ip["n"] == 6
+    assert ip["extraBody"] == '{"foo":"bar"}'
+
+    # W&B mapping
+    wb = body["wandbConfig"]
+    assert wb["enabled"] is True
+    assert wb["project"] == "proj"
+    assert wb["entity"] == "ent"
+    assert wb["runId"] == "run123"
+    assert wb["apiKey"] == "key123"
+
+
 def test_create_rft_picks_most_recent_evaluator_and_dataset_id_follows(tmp_path, monkeypatch):
     # Isolate HOME so expanduser paths remain inside tmp
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
