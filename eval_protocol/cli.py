@@ -371,13 +371,13 @@ def parse_args(args=None):
         help="Create a Reinforcement Fine-tuning Job on Fireworks",
     )
     rft_parser.add_argument(
-        "--evaluator-id",
-        help="Evaluator ID used during upload; if omitted, derive from local traces or a single discovered test",
+        "--evaluator",
+        help="Evaluator ID or fully-qualified resource (accounts/{acct}/evaluators/{id}); if omitted, derive from local tests",
     )
     # Dataset options
     rft_parser.add_argument(
-        "--dataset-id",
-        help="Use existing Fireworks dataset id (skip local materialization)",
+        "--dataset",
+        help="Use existing dataset (ID or resource 'accounts/{acct}/datasets/{id}') to skip local materialization",
     )
     rft_parser.add_argument(
         "--dataset-jsonl",
@@ -400,6 +400,8 @@ def parse_args(args=None):
     rft_parser.add_argument("--learning-rate", type=float, default=3e-5)
     rft_parser.add_argument("--max-context-length", type=int, default=65536)
     rft_parser.add_argument("--lora-rank", type=int, default=16)
+    rft_parser.add_argument("--gradient-accumulation-steps", type=int, help="Number of gradient accumulation steps")
+    rft_parser.add_argument("--learning-rate-warmup-steps", type=int, help="Number of LR warmup steps")
     rft_parser.add_argument("--accelerator-count", type=int, default=1)
     rft_parser.add_argument("--region", help="Fireworks region enum value")
     rft_parser.add_argument("--display-name", help="RFT job display name")
@@ -412,9 +414,14 @@ def parse_args(args=None):
     rft_parser.add_argument("--temperature", type=float)
     rft_parser.add_argument("--top-p", type=float)
     rft_parser.add_argument("--top-k", type=int)
-    rft_parser.add_argument("--max-tokens", type=int, default=32768)
-    rft_parser.add_argument("--n", type=int, default=8)
-    rft_parser.add_argument("--inference-extra-body", help="JSON string for extra inference params")
+    rft_parser.add_argument("--max-output-tokens", type=int, default=32768)
+    rft_parser.add_argument("--response-candidates-count", type=int, default=8)
+    rft_parser.add_argument("--extra-body", help="JSON string for extra inference params")
+    # MCP server (optional)
+    rft_parser.add_argument(
+        "--mcp-server",
+        help="The MCP server resource name to use for the reinforcement fine-tuning job.",
+    )
     # Wandb
     rft_parser.add_argument("--wandb-enabled", action="store_true")
     rft_parser.add_argument("--wandb-project")
@@ -422,7 +429,7 @@ def parse_args(args=None):
     rft_parser.add_argument("--wandb-run-id")
     rft_parser.add_argument("--wandb-api-key")
     # Misc
-    rft_parser.add_argument("--rft-job-id", help="Specify an explicit RFT job id")
+    rft_parser.add_argument("--job-id", help="Specify an explicit RFT job id")
     rft_parser.add_argument("--yes", "-y", action="store_true", help="Non-interactive mode")
     rft_parser.add_argument("--dry-run", action="store_true", help="Print planned REST calls without sending")
     rft_parser.add_argument("--force", action="store_true", help="Overwrite existing evaluator with the same ID")

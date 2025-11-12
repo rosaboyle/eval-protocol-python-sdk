@@ -65,8 +65,8 @@ def test_create_rft_passes_all_flags_into_request_body(tmp_path, monkeypatch):
 
     args = argparse.Namespace(
         # Evaluator and dataset
-        evaluator_id="my-evaluator",
-        dataset_id=None,
+        evaluator="my-evaluator",
+        dataset=None,
         dataset_jsonl=str(ds_path),
         dataset_display_name="My Dataset",
         dataset_builder=None,
@@ -91,9 +91,9 @@ def test_create_rft_passes_all_flags_into_request_body(tmp_path, monkeypatch):
         temperature=0.9,
         top_p=0.95,
         top_k=50,
-        max_tokens=4096,
-        n=6,
-        inference_extra_body='{"foo":"bar"}',
+        max_output_tokens=4096,
+        response_candidates_count=6,
+        extra_body='{"foo":"bar"}',
         # Rollout chunking and eval carveout
         chunk_size=250,
         eval_auto_carveout=False,  # explicitly disabled via --no-eval-auto-carveout
@@ -105,7 +105,7 @@ def test_create_rft_passes_all_flags_into_request_body(tmp_path, monkeypatch):
         wandb_run_id="run123",
         wandb_api_key="key123",
         # Unused in body but accepted by parser
-        rft_job_id=None,
+        job_id=None,
         display_name=None,
     )
 
@@ -195,12 +195,12 @@ def test_create_rft_picks_most_recent_evaluator_and_dataset_id_follows(tmp_path,
 
     # Build args: non_interactive (yes=True), no explicit evaluator_id, valid warm_start_from
     args = type("Args", (), {})()
-    setattr(args, "evaluator_id", None)
+    setattr(args, "evaluator", None)
     setattr(args, "yes", True)
     setattr(args, "dry_run", False)
     setattr(args, "force", False)
     setattr(args, "env_file", None)
-    setattr(args, "dataset_id", None)
+    setattr(args, "dataset", None)
     setattr(args, "dataset_jsonl", str(ds_path))
     setattr(args, "dataset_display_name", None)
     setattr(args, "dataset_builder", None)
@@ -283,12 +283,12 @@ def test_create_rft_passes_matching_evaluator_id_and_entry_with_multiple_tests(t
     import argparse
 
     args = argparse.Namespace(
-        evaluator_id=cr._normalize_evaluator_id("foo_eval-test_bar_evaluation"),
+        evaluator=cr._normalize_evaluator_id("foo_eval-test_bar_evaluation"),
         yes=True,
         dry_run=False,
         force=False,
         env_file=None,
-        dataset_id=None,
+        dataset=None,
         dataset_jsonl=str(ds_path),
         dataset_display_name=None,
         dataset_builder=None,
@@ -371,12 +371,12 @@ def test_create_rft_interactive_selector_single_test(tmp_path, monkeypatch):
     import argparse
 
     args = argparse.Namespace(
-        evaluator_id=None,
+        evaluator=None,
         yes=True,
         dry_run=False,
         force=False,
         env_file=None,
-        dataset_id=None,
+        dataset=None,
         dataset_jsonl=str(ds_path),
         dataset_display_name=None,
         dataset_builder=None,
@@ -438,12 +438,12 @@ def test_create_rft_quiet_existing_evaluator_skips_upload(tmp_path, monkeypatch)
     import argparse
 
     args = argparse.Namespace(
-        evaluator_id="some-eval",
+        evaluator="some-eval",
         yes=True,
         dry_run=False,
         force=False,
         env_file=None,
-        dataset_id=None,
+        dataset=None,
         dataset_jsonl=str(ds_path),
         dataset_display_name=None,
         dataset_builder=None,
@@ -495,12 +495,12 @@ def test_create_rft_quiet_new_evaluator_ambiguous_without_entry_errors(tmp_path,
     import argparse
 
     args = argparse.Namespace(
-        evaluator_id="some-eval",
+        evaluator="some-eval",
         yes=True,
         dry_run=False,
         force=False,
         env_file=None,
-        dataset_id=None,
+        dataset=None,
         dataset_jsonl=str(project / "dataset.jsonl"),
         dataset_display_name=None,
         dataset_builder=None,
@@ -571,12 +571,12 @@ def test_create_rft_fallback_to_dataset_builder(tmp_path, monkeypatch):
     import argparse
 
     args = argparse.Namespace(
-        evaluator_id=None,
+        evaluator=None,
         yes=True,
         dry_run=False,
         force=False,
         env_file=None,
-        dataset_id=None,
+        dataset=None,
         dataset_jsonl=None,
         dataset_display_name=None,
         dataset_builder=None,
@@ -648,12 +648,12 @@ def test_create_rft_uses_dataloader_jsonl_when_available(tmp_path, monkeypatch):
     import argparse
 
     args = argparse.Namespace(
-        evaluator_id=None,
+        evaluator=None,
         yes=True,
         dry_run=False,
         force=False,
         env_file=None,
-        dataset_id=None,
+        dataset=None,
         dataset_jsonl=None,
         dataset_display_name=None,
         dataset_builder=None,
@@ -723,12 +723,12 @@ def test_create_rft_uses_input_dataset_jsonl_when_available(tmp_path, monkeypatc
     import argparse
 
     args = argparse.Namespace(
-        evaluator_id=None,
+        evaluator=None,
         yes=True,
         dry_run=False,
         force=False,
         env_file=None,
-        dataset_id=None,
+        dataset=None,
         dataset_jsonl=None,
         dataset_display_name=None,
         dataset_builder=None,
@@ -815,12 +815,12 @@ def test_create_rft_quiet_existing_evaluator_infers_dataset_from_matching_test(t
     # Provide evaluator_id that matches beta.test_two
     eval_id = cr._normalize_evaluator_id("beta-test_two")
     args = argparse.Namespace(
-        evaluator_id=eval_id,
+        evaluator=eval_id,
         yes=True,
         dry_run=False,
         force=False,
         env_file=None,
-        dataset_id=None,
+        dataset=None,
         dataset_jsonl=None,
         dataset_display_name=None,
         dataset_builder=None,
@@ -844,3 +844,195 @@ def test_create_rft_quiet_existing_evaluator_infers_dataset_from_matching_test(t
     # Ensure the dataset id is based on evaluator_id
     assert captured["dataset_id"].startswith(f"{eval_id}-dataset-")
     assert captured["jsonl_path"] == str(jsonl_path)
+
+
+def test_cli_full_command_style_evaluator_and_dataset_flags(monkeypatch):
+    # Env
+    monkeypatch.setenv("FIREWORKS_API_KEY", "fw_dummy")
+    monkeypatch.setenv("FIREWORKS_ACCOUNT_ID", "pyroworks-dev")
+    monkeypatch.setenv("FIREWORKS_API_BASE", "https://api.fireworks.ai")
+
+    # Mock evaluator exists and ACTIVE
+    class _Resp:
+        ok = True
+
+        def json(self):
+            return {"state": "ACTIVE"}
+
+        def raise_for_status(self):
+            return None
+
+    from eval_protocol.cli_commands import create_rft as cr
+
+    monkeypatch.setattr(cr.requests, "get", lambda *a, **k: _Resp())
+
+    # Capture URL and JSON via fireworks layer
+    import eval_protocol.fireworks_rft as fr
+
+    captured = {"url": None, "json": None}
+
+    class _RespPost:
+        status_code = 200
+
+        def json(self):
+            return {"name": "accounts/pyroworks-dev/reinforcementFineTuningJobs/xyz"}
+
+    def _fake_post(url, json=None, headers=None, timeout=None):
+        captured["url"] = url
+        captured["json"] = json
+        return _RespPost()
+
+    monkeypatch.setattr(fr.requests, "post", _fake_post)
+
+    # Build args via CLI parser to validate flag names
+    from eval_protocol.cli import parse_args
+
+    argv = [
+        "create",
+        "rft",
+        "--base-model",
+        "accounts/fireworks/models/qwen3-0p6b",
+        "--dataset",
+        "svgbench-small",
+        "--output-model",
+        "svgbench-agent-small-bchen-2",
+        "--evaluator",
+        "accounts/pyroworks-dev/evaluators/test-livesvgbench-test-svg-combined-evaluation1",
+        "--max-context-length",
+        "65536",
+        "--response-candidates-count",
+        "4",
+        "--batch-size",
+        "128000",
+        "--chunk-size",
+        "50",
+        "--epochs",
+        "4",
+        "--max-output-tokens",
+        "32768",
+        "--learning-rate",
+        "0.00003",
+        "--lora-rank",
+        "16",
+        "--job-id",
+        "custom-job-123",
+        "--yes",
+    ]
+    args, _ = parse_args(argv)
+
+    # Execute command
+    rc = cr.create_rft_command(args)
+    assert rc == 0
+    assert captured["json"] is not None
+    body = captured["json"]
+
+    # Evaluator and dataset resources
+    assert body["evaluator"] == "accounts/pyroworks-dev/evaluators/test-livesvgbench-test-svg-combined-evaluation1"
+    assert body["dataset"] == "accounts/pyroworks-dev/datasets/svgbench-small"
+
+    # Training config mapping
+    tc = body["trainingConfig"]
+    assert tc["baseModel"] == "accounts/fireworks/models/qwen3-0p6b"
+    assert tc["outputModel"] == "accounts/pyroworks-dev/models/svgbench-agent-small-bchen-2"
+    assert tc["epochs"] == 4
+    assert tc["batchSize"] == 128000
+    assert abs(tc["learningRate"] - 0.00003) < 1e-12
+    assert tc["loraRank"] == 16
+    assert tc["maxContextLength"] == 65536
+
+    # Inference params mapping
+    ip = body["inferenceParameters"]
+    assert ip["n"] == 4
+    assert ip["maxTokens"] == 32768
+
+    # Other top-level
+    assert body["chunkSize"] == 50
+    # Job id sent as query param
+    assert captured["url"] is not None and "reinforcementFineTuningJobId=custom-job-123" in captured["url"]
+    assert "jobId" not in body
+
+
+def test_create_rft_prefers_explicit_dataset_jsonl_over_input_dataset(tmp_path, monkeypatch):
+    # Setup project
+    project = tmp_path / "proj"
+    project.mkdir()
+    monkeypatch.chdir(project)
+
+    # Environment
+    monkeypatch.setenv("FIREWORKS_API_KEY", "fw_dummy")
+    monkeypatch.setenv("FIREWORKS_ACCOUNT_ID", "acct123")
+    monkeypatch.setenv("FIREWORKS_API_BASE", "https://api.fireworks.ai")
+
+    # Single discovered test
+    test_file = project / "metric" / "test_pref.py"
+    test_file.parent.mkdir(parents=True, exist_ok=True)
+    test_file.write_text("# prefer explicit dataset_jsonl", encoding="utf-8")
+    single_disc = SimpleNamespace(qualname="metric.test_pref", file_path=str(test_file))
+    monkeypatch.setattr(cr, "_discover_tests", lambda cwd: [single_disc])
+
+    # Stub selector, upload, and polling
+    import eval_protocol.cli_commands.upload as upload_mod
+
+    monkeypatch.setattr(upload_mod, "_prompt_select", lambda tests, non_interactive=False: tests[:1])
+    monkeypatch.setattr(upload_mod, "upload_command", lambda args: 0)
+    monkeypatch.setattr(cr, "_poll_evaluator_status", lambda **kwargs: True)
+
+    # Prepare two JSONL paths: one explicit via --dataset-jsonl and one inferable via input_dataset
+    explicit_jsonl = project / "metric" / "explicit.jsonl"
+    explicit_jsonl.write_text('{"row":"explicit"}\n', encoding="utf-8")
+    inferred_jsonl = project / "metric" / "inferred.jsonl"
+    inferred_jsonl.write_text('{"row":"inferred"}\n', encoding="utf-8")
+
+    # If inference were to happen, return inferred path — but explicit should win
+    monkeypatch.setattr(cr, "_extract_jsonl_from_dataloader", lambda f, fn: None)
+    calls = {"input_dataset": 0}
+
+    def _extract_input_dataset(file_path, func_name):
+        calls["input_dataset"] += 1
+        return str(inferred_jsonl)
+
+    monkeypatch.setattr(cr, "_extract_jsonl_from_input_dataset", _extract_input_dataset)
+    monkeypatch.setattr(cr, "detect_dataset_builder", lambda metric_dir: None)
+
+    captured = {"jsonl_path": None}
+
+    def _fake_create_dataset_from_jsonl(account_id, api_key, api_base, dataset_id, display_name, jsonl_path):
+        captured["jsonl_path"] = jsonl_path
+        return dataset_id, {"name": f"accounts/{account_id}/datasets/{dataset_id}", "state": "UPLOADING"}
+
+    monkeypatch.setattr(cr, "create_dataset_from_jsonl", _fake_create_dataset_from_jsonl)
+    monkeypatch.setattr(cr, "create_reinforcement_fine_tuning_job", lambda *a, **k: {"name": "jobs/123"})
+
+    import argparse
+
+    args = argparse.Namespace(
+        evaluator=None,
+        yes=True,
+        dry_run=False,
+        force=False,
+        env_file=None,
+        dataset=None,
+        dataset_jsonl=str(explicit_jsonl),
+        dataset_display_name=None,
+        dataset_builder=None,
+        base_model=None,
+        warm_start_from="accounts/acct123/models/ft-abc123",
+        output_model=None,
+        n=None,
+        max_tokens=None,
+        learning_rate=None,
+        batch_size=None,
+        epochs=None,
+        lora_rank=None,
+        max_context_length=None,
+        chunk_size=None,
+        eval_auto_carveout=None,
+    )
+
+    rc = cr.create_rft_command(args)
+    assert rc == 0
+    # Ensure the explicitly provided JSONL file is used, not the inferred one
+    assert captured["jsonl_path"] == str(explicit_jsonl)
+    assert captured["jsonl_path"] != str(inferred_jsonl)
+    # And because --dataset-jsonl was provided, we should never call the input_dataset extractor
+    assert calls["input_dataset"] == 0

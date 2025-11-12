@@ -344,7 +344,7 @@ def _poll_evaluator_status(
 
 
 def create_rft_command(args) -> int:
-    evaluator_id: Optional[str] = getattr(args, "evaluator_id", None)
+    evaluator_id: Optional[str] = getattr(args, "evaluator", None)
     non_interactive: bool = bool(getattr(args, "yes", False))
     dry_run: bool = bool(getattr(args, "dry_run", False))
     force: bool = bool(getattr(args, "force", False))
@@ -373,11 +373,11 @@ def create_rft_command(args) -> int:
             print("No evaluation tests found.")
             print("\nHint: Make sure your tests use the @evaluation_test decorator.")
             return 1
-        # Always interactive selection here (no implicit quiet unless --evaluator-id was provided)
+        # Always interactive selection here
         try:
             selected_tests = _prompt_select(tests, non_interactive=non_interactive)
         except Exception:
-            print("Error: Failed to open selector UI. Please pass --evaluator-id or --entry explicitly.")
+            print("Error: Failed to open selector UI. Please pass --evaluator or --entry explicitly.")
             return 1
         if not selected_tests:
             print("No tests selected.")
@@ -385,7 +385,7 @@ def create_rft_command(args) -> int:
         if len(selected_tests) != 1:
             if non_interactive and len(selected_tests) > 1:
                 print("Error: Multiple evaluation tests found in --yes (non-interactive) mode.")
-                print("       Please pass --evaluator-id or --entry to disambiguate.")
+                print("       Please pass --evaluator or --entry to disambiguate.")
                 try:
                     # Offer candidate evaluator ids for convenience
                     tests = _discover_tests(project_root)
@@ -410,8 +410,13 @@ def create_rft_command(args) -> int:
         selected_test_file_path, selected_test_func_name = _resolve_selected_test(
             project_root, evaluator_id, selected_tests=selected_tests
         )
-    # Resolve evaluator resource name to fully-qualified format required by API
-    evaluator_resource_name = f"accounts/{account_id}/evaluators/{evaluator_id}"
+    # Resolve evaluator resource name to fully-qualified format required by API.
+    # Allow users to pass either short id or fully-qualified resource.
+    if evaluator_id and evaluator_id.startswith("accounts/"):
+        evaluator_resource_name = evaluator_id
+        evaluator_id = _extract_terminal_segment(evaluator_id)
+    else:
+        evaluator_resource_name = f"accounts/{account_id}/evaluators/{evaluator_id}"
 
     # Optional short-circuit: if evaluator already exists and not forcing, skip upload path
     skip_upload = False
@@ -470,10 +475,10 @@ def create_rft_command(args) -> int:
             # If still unresolved and multiple tests exist, fail fast to avoid uploading unintended evaluators
             if selected_entry is None and len(tests) > 1:
                 print(
-                    f"Error: Multiple evaluation tests found, and the selected evaluator_id {evaluator_id} does not match any discovered test.\n"
-                    "       Please re-run specifying the evaluator id.\n"
+                    f"Error: Multiple evaluation tests found, and the selected evaluator {evaluator_id} does not match any discovered test.\n"
+                    "       Please re-run specifying the evaluator.\n"
                     "       Hints:\n"
-                    "         - eval-protocol create rft --evaluator-id <existing-evaluator-id>\n"
+                    "         - eval-protocol create rft --evaluator <existing-evaluator-id>\n"
                 )
                 return 1
 
@@ -523,10 +528,15 @@ def create_rft_command(args) -> int:
             print(f"Warning: Failed to upload evaluator automatically: {e}")
 
     # Determine dataset id and materialization path
-    dataset_id = getattr(args, "dataset_id", None)
+    dataset_id = getattr(args, "dataset", None)
     dataset_jsonl = getattr(args, "dataset_jsonl", None)
     dataset_display_name = getattr(args, "dataset_display_name", None)
     dataset_builder = getattr(args, "dataset_builder", None)  # accepted but unused in simplified flow
+    dataset_resource_override: Optional[str] = None
+    if isinstance(dataset_id, str) and dataset_id.startswith("accounts/"):
+        # Caller passed a fully-qualified dataset; capture it for body and keep only terminal id for printing
+        dataset_resource_override = dataset_id
+        dataset_id = _extract_terminal_segment(dataset_id)
 
     if not dataset_id:
         # Prefer explicit --dataset-jsonl, else attempt to extract from the selected test's data loader or input_dataset.
@@ -573,7 +583,7 @@ def create_rft_command(args) -> int:
                             print(f"Warning: dataset builder failed: {e}")
         if not dataset_jsonl:
             print(
-                "Error: Could not determine dataset. Provide --dataset-id or --dataset-jsonl, or ensure a JSONL-based data loader or input_dataset is used in your single discovered test."
+                "Error: Could not determine dataset. Provide --dataset or --dataset-jsonl, or ensure a JSONL-based data loader or input_dataset is used in your single discovered test."
             )
             return 1
 
@@ -628,6 +638,8 @@ def create_rft_command(args) -> int:
         ("learningRate", "learning_rate"),
         ("maxContextLength", "max_context_length"),
         ("loraRank", "lora_rank"),
+        ("gradientAccumulationSteps", "gradient_accumulation_steps"),
+        ("learningRateWarmupSteps", "learning_rate_warmup_steps"),
         ("acceleratorCount", "accelerator_count"),
         ("region", "region"),
     ]:
@@ -640,14 +652,25 @@ def create_rft_command(args) -> int:
         ("temperature", "temperature"),
         ("topP", "top_p"),
         ("topK", "top_k"),
-        ("maxTokens", "max_tokens"),
-        ("n", "n"),
+        ("maxTokens", "max_output_tokens"),
+        ("n", "response_candidates_count"),
     ]:
         val = getattr(args, arg_name, None)
         if val is not None:
             inference_params[key] = val
-    if getattr(args, "inference_extra_body", None):
-        inference_params["extraBody"] = args.inference_extra_body
+    if getattr(args, "extra_body", None):
+        extra = getattr(args, "extra_body")
+        if isinstance(extra, (dict, list)):
+            try:
+                inference_params["extraBody"] = json.dumps(extra, ensure_ascii=False)
+            except (TypeError, ValueError) as e:
+                print(f"Error: --extra-body dict/list must be JSON-serializable: {e}")
+                return 1
+        elif isinstance(extra, str):
+            inference_params["extraBody"] = extra
+        else:
+            print("Error: --extra-body must be a JSON string or a JSON-serializable dict/list.")
+            return 1
 
     wandb_config: Optional[Dict[str, Any]] = None
     if getattr(args, "wandb_enabled", False):
@@ -659,9 +682,12 @@ def create_rft_command(args) -> int:
             "runId": getattr(args, "wandb_run_id", None),
         }
 
+    # Build dataset resource (prefer override when provided)
+    dataset_resource = dataset_resource_override or f"accounts/{account_id}/datasets/{dataset_id}"
+
     body: Dict[str, Any] = {
-        # "displayName": getattr(args, "display_name", None) or f"{evaluator_id}-rft",
-        "dataset": f"accounts/{account_id}/datasets/{dataset_id}",
+        "displayName": getattr(args, "display_name", None),
+        "dataset": dataset_resource,
         "evaluator": evaluator_resource_name,
         "evalAutoCarveout": bool(getattr(args, "eval_auto_carveout", True)),
         "trainingConfig": training_config,
@@ -670,7 +696,8 @@ def create_rft_command(args) -> int:
         "chunkSize": getattr(args, "chunk_size", None),
         "outputStats": None,
         "outputMetrics": None,
-        "mcpServer": None,
+        "mcpServer": getattr(args, "mcp_server", None),
+        "jobId": getattr(args, "job_id", None),
     }
     # Debug: print minimal summary
     print(f"Prepared RFT job for evaluator '{evaluator_id}' using dataset '{dataset_id}'")
