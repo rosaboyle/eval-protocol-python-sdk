@@ -132,8 +132,6 @@ braintrust = [
 ]
 openenv = [
     "openenv-core",
-    "openenv @ git+https://github.com/meta-pytorch/OpenEnv.git",
-    "openenv-browsergym-env @ git+https://github.com/meta-pytorch/OpenEnv.git#subdirectory=src/envs/browsergym_env",
 ]
 
 # Optional deps for LangGraph example/tests
