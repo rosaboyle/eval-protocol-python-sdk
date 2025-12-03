@@ -146,7 +146,7 @@ class LiteLLMPolicy(LLMBasePolicy):
             Clean messages with only OpenAI API compatible fields
         """
         # Standard OpenAI message fields
-        allowed_fields = {"role", "content", "tool_calls", "tool_call_id", "name"}
+        allowed_fields = {"role", "content", "tool_calls", "tool_call_id", "name", "reasoning_details"}
 
         clean_messages = []
         for msg in messages:
@@ -217,12 +217,15 @@ class LiteLLMPolicy(LLMBasePolicy):
                 logger.debug(f"🔄 API call for model: {self.model_id}")
 
             # LiteLLM already returns OpenAI-compatible format
+            message_obj = getattr(response.choices[0], "message", object())
+
             return {
                 "choices": [
                     {
                         "message": {
-                            "role": getattr(getattr(response.choices[0], "message", object()), "role", "assistant"),
-                            "content": getattr(getattr(response.choices[0], "message", object()), "content", None),
+                            "role": getattr(message_obj, "role", "assistant"),
+                            "content": getattr(message_obj, "content", None),
+                            "provider_specific_fields": getattr(message_obj, "provider_specific_fields", None),
                             "tool_calls": (
                                 [
                                     {
@@ -233,12 +236,9 @@ class LiteLLMPolicy(LLMBasePolicy):
                                             "arguments": getattr(getattr(tc, "function", None), "arguments", "{}"),
                                         },
                                     }
-                                    for tc in (
-                                        getattr(getattr(response.choices[0], "message", object()), "tool_calls", [])
-                                        or []
-                                    )
+                                    for tc in (getattr(message_obj, "tool_calls", []) or [])
                                 ]
-                                if getattr(getattr(response.choices[0], "message", object()), "tool_calls", None)
+                                if getattr(message_obj, "tool_calls", None)
                                 else []
                             ),
                         },
