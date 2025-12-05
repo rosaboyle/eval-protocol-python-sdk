@@ -1397,7 +1397,7 @@ requires-dist = [
     { name = "pillow", marker = "extra == 'box2d'" },
     { name = "pip", marker = "extra == 'dev'", specifier = ">=25.1.1" },
     { name = "pre-commit", marker = "extra == 'dev'" },
-    { name = "psutil", specifier = ">=5.8.0" },
+    { name = "psutil", specifier = ">=6.0.0" },
     { name = "psycopg2-binary", marker = "extra == 'chinook'", specifier = ">=2.9.10" },
     { name = "pydantic", specifier = ">=2.0.0" },
     { name = "pydantic-ai", marker = "extra == 'pydantic'", specifier = ">=1.0.2" },
