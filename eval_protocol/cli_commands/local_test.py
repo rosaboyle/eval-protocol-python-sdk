@@ -37,9 +37,10 @@ def _build_docker_image(dockerfile_path: str, image_tag: str, build_extras: List
 
 def _run_pytest_host(pytest_target: str) -> int:
     """Run pytest against a target on the host and return its exit code."""
-    print(f"Running locally: pytest {pytest_target} -vs")
     # Always enforce a small success threshold for evaluation_test-based suites so that runs with all-zero scores fail.
     cmd = [sys.executable, "-m", "pytest", "--ep-success-threshold", "0.001", pytest_target, "-vs"]
+    # Print the exact command being executed for easier debugging.
+    print("Running locally:", " ".join(cmd))
     proc = subprocess.run(cmd)
     return proc.returncode
 
