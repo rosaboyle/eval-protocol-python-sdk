@@ -12,6 +12,50 @@ from typing import Any, Dict, List, Optional
 from ..resource_abc import ForkableResource
 
 
+# SQLite connection settings for hardened concurrency safety
+SQLITE_CONNECTION_TIMEOUT = 30  # 30 seconds
+
+
+def _apply_hardened_pragmas(conn: sqlite3.Connection) -> None:
+    """Apply hardened SQLite pragmas for concurrency safety."""
+    conn.execute("PRAGMA journal_mode=WAL")  # Write-Ahead Logging
+    conn.execute("PRAGMA synchronous=NORMAL")  # Balance safety and performance
+    conn.execute("PRAGMA busy_timeout=30000")  # 30 second timeout
+    conn.execute("PRAGMA wal_autocheckpoint=1000")  # Checkpoint every 1000 pages
+    conn.execute("PRAGMA cache_size=-64000")  # 64MB cache
+    conn.execute("PRAGMA foreign_keys=ON")  # Enable foreign key constraints
+    conn.execute("PRAGMA temp_store=MEMORY")  # Store temp tables in memory
+
+
+def _checkpoint_and_copy_database(
+    source_path: Path, dest_path: Path, timeout: int = SQLITE_CONNECTION_TIMEOUT
+) -> None:
+    """
+    Safely copy a SQLite database by checkpointing WAL first.
+
+    In WAL mode, data may exist in the -wal file that hasn't been written
+    to the main database file. This function performs a TRUNCATE checkpoint
+    to flush all WAL data to the main file before copying, ensuring a
+    complete and consistent copy.
+
+    Args:
+        source_path: Path to the source database file.
+        dest_path: Path where the copy should be created.
+        timeout: Connection timeout in seconds.
+    """
+    # First, checkpoint the WAL to ensure all data is in the main file
+    conn = sqlite3.connect(str(source_path), timeout=timeout)
+    try:
+        # TRUNCATE mode: checkpoint and truncate the WAL file to zero bytes
+        # This ensures all data is flushed to the main database file
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    finally:
+        conn.close()
+
+    # Now safely copy just the main database file
+    shutil.copyfile(str(source_path), str(dest_path))
+
+
 class SQLResource(ForkableResource):
     """
     A ForkableResource for managing SQL database states, primarily SQLite.
@@ -19,6 +63,8 @@ class SQLResource(ForkableResource):
     Manages a SQLite database file, allowing it to be initialized with a schema
     and seed data, forked (by copying the DB file), checkpointed (by copying),
     and restored.
+
+    Uses hardened SQLite settings for concurrency safety.
 
     Attributes:
         _config (Dict[str, Any]): Configuration for the resource.
@@ -38,8 +84,14 @@ class SQLResource(ForkableResource):
     def _get_db_connection(self) -> sqlite3.Connection:
         if not self._db_path:
             raise ConnectionError("Database path not set. Call setup() or fork() first.")
-        # Set timeout to prevent indefinite hangs
-        return sqlite3.connect(str(self._db_path), timeout=10)
+        # Set timeout to prevent indefinite hangs with hardened settings
+        conn = sqlite3.connect(
+            str(self._db_path),
+            timeout=SQLITE_CONNECTION_TIMEOUT,
+            isolation_level="DEFERRED",  # Better for concurrent access
+        )
+        _apply_hardened_pragmas(conn)
+        return conn
 
     async def setup(self, config: Dict[str, Any]) -> None:
         """
@@ -111,7 +163,8 @@ class SQLResource(ForkableResource):
         forked_db_name = f"fork_{uuid.uuid4().hex}.sqlite"
         forked_resource._db_path = self._temp_dir / forked_db_name
 
-        shutil.copyfile(str(self._db_path), str(forked_resource._db_path))
+        # Use checkpoint-and-copy to ensure WAL data is flushed before copying
+        _checkpoint_and_copy_database(self._db_path, forked_resource._db_path)
         return forked_resource
 
     async def checkpoint(self) -> Dict[str, Any]:
@@ -125,7 +178,8 @@ class SQLResource(ForkableResource):
 
         checkpoint_name = f"checkpoint_{self._db_path.stem}_{uuid.uuid4().hex}.sqlite"
         checkpoint_path = self._temp_dir / checkpoint_name
-        shutil.copyfile(str(self._db_path), str(checkpoint_path))
+        # Use checkpoint-and-copy to ensure WAL data is flushed before copying
+        _checkpoint_and_copy_database(self._db_path, checkpoint_path)
         return {"db_type": "sqlite", "checkpoint_path": str(checkpoint_path)}
 
     async def restore(self, state_data: Dict[str, Any]) -> None:
@@ -147,7 +201,8 @@ class SQLResource(ForkableResource):
         if not self._db_path:
             self._db_path = self._temp_dir / f"restored_{uuid.uuid4().hex}.sqlite"
 
-        shutil.copyfile(str(checkpoint_path), str(self._db_path))
+        # Use checkpoint-and-copy to ensure WAL data is flushed before copying
+        _checkpoint_and_copy_database(checkpoint_path, self._db_path)
         self._base_db_path = self._db_path  # The restored state becomes the new base for future forks
 
     async def step(self, action_name: str, action_params: Dict[str, Any]) -> Any:
