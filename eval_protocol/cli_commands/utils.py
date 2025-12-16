@@ -396,15 +396,11 @@ def _normalize_evaluator_id(evaluator_id: str) -> str:
 
 
 def _ensure_account_id() -> Optional[str]:
-    """Resolve and cache FIREWORKS_ACCOUNT_ID if possible."""
-    account_id = get_fireworks_account_id()
+    """Resolve Fireworks account id from FIREWORKS_API_KEY via verifyApiKey."""
     api_key = get_fireworks_api_key()
-    if not account_id and api_key:
-        resolved = verify_api_key_and_get_account_id(api_key=api_key, api_base=get_fireworks_api_base())
-        if resolved:
-            os.environ["FIREWORKS_ACCOUNT_ID"] = resolved
-            return resolved
-    return account_id
+    if not api_key:
+        return None
+    return verify_api_key_and_get_account_id(api_key=api_key, api_base=get_fireworks_api_base())
 
 
 def _extract_terminal_segment(resource_name: str) -> str:
