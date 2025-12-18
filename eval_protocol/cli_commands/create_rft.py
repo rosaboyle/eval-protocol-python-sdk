@@ -660,8 +660,8 @@ def _create_rft_job(
         ("temperature", "temperature"),
         ("topP", "top_p"),
         ("topK", "top_k"),
-        ("maxTokens", "max_output_tokens"),
-        ("n", "response_candidates_count"),
+        ("maxOutputTokens", "max_output_tokens"),
+        ("responseCandidatesCount", "response_candidates_count"),
     ]:
         val = getattr(args, arg_name, None)
         if val is not None:

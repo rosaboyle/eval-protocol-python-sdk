@@ -182,8 +182,8 @@ def test_create_rft_passes_all_flags_into_request_body(rft_test_harness, monkeyp
     assert abs(ip["temperature"] - 0.9) < 1e-12
     assert abs(ip["topP"] - 0.95) < 1e-12
     assert ip["topK"] == 50
-    assert ip["maxTokens"] == 4096
-    assert ip["n"] == 6
+    assert ip["maxOutputTokens"] == 4096
+    assert ip["responseCandidatesCount"] == 6
     assert ip["extraBody"] == '{"foo":"bar"}'
 
     # W&B mapping
@@ -1126,8 +1126,8 @@ def test_cli_full_command_style_evaluator_and_dataset_flags(tmp_path, monkeypatc
 
     # Inference params mapping
     ip = body["inferenceParameters"]
-    assert ip["n"] == 4
-    assert ip["maxTokens"] == 32768
+    assert ip["responseCandidatesCount"] == 4
+    assert ip["maxOutputTokens"] == 32768
 
     # Other top-level
     assert body["chunkSize"] == 50
