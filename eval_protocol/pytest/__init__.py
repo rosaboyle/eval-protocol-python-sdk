@@ -1,6 +1,5 @@
 from .default_agent_rollout_processor import AgentRolloutProcessor
 from .default_dataset_adapter import default_dataset_adapter
-from .default_klavis_sandbox_rollout_processor import KlavisSandboxRolloutProcessor
 from .default_mcp_gym_rollout_processor import MCPGymRolloutProcessor
 from .default_no_op_rollout_processor import NoOpRolloutProcessor
 from .default_single_turn_rollout_process import SingleTurnRolloutProcessor
@@ -11,6 +10,15 @@ from .exception_config import ExceptionHandlerConfig, BackoffConfig, get_default
 from .rollout_processor import RolloutProcessor
 from .rollout_result_post_processor import RolloutResultPostProcessor, NoOpRolloutResultPostProcessor
 from .types import RolloutProcessorConfig
+
+# Conditional import for optional Klavis dependency
+try:
+    from .default_klavis_sandbox_rollout_processor import KlavisSandboxRolloutProcessor
+
+    KLAVIS_AVAILABLE = True
+except ImportError:
+    KLAVIS_AVAILABLE = False
+    KlavisSandboxRolloutProcessor = None
 
 # Conditional import for optional dependencies
 try:
@@ -32,7 +40,6 @@ except ImportError:
 
 __all__ = [
     "AgentRolloutProcessor",
-    "KlavisSandboxRolloutProcessor",
     "MCPGymRolloutProcessor",
     "RolloutProcessor",
     "SingleTurnRolloutProcessor",
@@ -48,6 +55,10 @@ __all__ = [
     "RolloutResultPostProcessor",
     "NoOpRolloutResultPostProcessor",
 ]
+
+# Only add to __all__ if available
+if KLAVIS_AVAILABLE:
+    __all__.append("KlavisSandboxRolloutProcessor")
 
 # Only add to __all__ if available
 if PYDANTIC_AI_AVAILABLE:
