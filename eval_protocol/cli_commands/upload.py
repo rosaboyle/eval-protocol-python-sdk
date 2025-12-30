@@ -1,4 +1,5 @@
 import argparse
+from eval_protocol.cli_commands.utils import DiscoveredTest
 import importlib.util
 import os
 import re
@@ -16,6 +17,7 @@ from .utils import (
     _discover_and_select_tests,
     _discover_tests,
     _ensure_account_id,
+    _get_questionary_style,
     _normalize_evaluator_id,
     _prompt_select,
 )
@@ -136,8 +138,6 @@ def _resolve_entry_to_qual_and_source(entry: str, cwd: str) -> tuple[str, str]:
 def _load_secrets_from_env_file(env_file_path: str) -> Dict[str, str]:
     """
     Load secrets from a .env file that should be uploaded to Fireworks.
-
-    Returns a dictionary of secret key-value pairs that contain 'API_KEY' in the name.
     """
     if not os.path.exists(env_file_path):
         return {}
@@ -152,14 +152,7 @@ def _load_secrets_from_env_file(env_file_path: str) -> Dict[str, str]:
                 key = key.strip()
                 value = value.strip().strip('"').strip("'")  # Remove quotes
                 env_vars[key] = value
-
-    # Filter for secrets that look like API keys
-    secrets = {}
-    for key, value in env_vars.items():
-        if "API_KEY" in key.upper() and value:
-            secrets[key] = value
-
-    return secrets
+    return env_vars
 
 
 def _mask_secret_value(value: str) -> str:
@@ -179,6 +172,109 @@ def _mask_secret_value(value: str) -> str:
         return "<masked>"
 
 
+def _prompt_select_secrets(
+    secrets: Dict[str, str],
+    secrets_from_env_file: Dict[str, str],
+    non_interactive: bool,
+) -> Dict[str, str]:
+    """
+    Prompt user to select which environment variables to upload as secrets.
+    Returns the selected secrets.
+    """
+    if not secrets:
+        return {}
+
+    if non_interactive:
+        return secrets
+
+    # Check if running in a non-TTY environment (e.g., CI/CD)
+    if not sys.stdin.isatty():
+        return secrets
+
+    try:
+        import questionary
+
+        custom_style = _get_questionary_style()
+
+        # Build choices with source info and masked values
+        choices = []
+        for key, value in secrets.items():
+            source = ".env" if key in secrets_from_env_file else "env"
+            masked = _mask_secret_value(value)
+            label = f"{key} ({source}: {masked})"
+            choices.append(questionary.Choice(title=label, value=key, checked=True))
+
+        if len(choices) == 0:
+            return {}
+
+        print("\nFound environment variables to upload as Fireworks secrets:")
+        selected_keys = questionary.checkbox(
+            "Select secrets to upload:",
+            choices=choices,
+            style=custom_style,
+            pointer=">",
+            instruction="(↑↓ move, space select, enter confirm)",
+        ).ask()
+
+        if selected_keys is None:
+            # User cancelled with Ctrl+C
+            print("\nSecret upload cancelled.")
+            return {}
+
+        return {k: v for k, v in secrets.items() if k in selected_keys}
+
+    except ImportError:
+        # Fallback to simple text-based selection
+        return _prompt_select_secrets_fallback(secrets, secrets_from_env_file)
+    except KeyboardInterrupt:
+        print("\n\nSecret upload cancelled.")
+        return {}
+
+
+def _prompt_select_secrets_fallback(
+    secrets: Dict[str, str],
+    secrets_from_env_file: Dict[str, str],
+) -> Dict[str, str]:
+    """Fallback prompt selection for when questionary is not available."""
+    print("\n" + "=" * 60)
+    print("Found environment variables to upload as Fireworks secrets:")
+    print("=" * 60)
+    print("\nTip: Install questionary for better UX: pip install questionary\n")
+
+    secret_list = list(secrets.items())
+    for idx, (key, value) in enumerate(secret_list, 1):
+        source = ".env" if key in secrets_from_env_file else "env"
+        masked = _mask_secret_value(value)
+        print(f"  [{idx}] {key} ({source}: {masked})")
+
+    print("\n" + "=" * 60)
+    print("Enter numbers to select (comma-separated), 'all' for all, or 'none' to skip:")
+
+    try:
+        choice = input("Selection: ").strip().lower()
+    except KeyboardInterrupt:
+        print("\nSecret upload cancelled.")
+        return {}
+
+    if not choice or choice == "none":
+        return {}
+
+    if choice == "all":
+        return secrets
+
+    try:
+        indices = [int(x.strip()) for x in choice.split(",")]
+        selected = {}
+        for idx in indices:
+            if 1 <= idx <= len(secret_list):
+                key, value = secret_list[idx - 1]
+                selected[key] = value
+        return selected
+    except ValueError:
+        print("Invalid input. Skipping secret upload.")
+        return {}
+
+
 def upload_command(args: argparse.Namespace) -> int:
     root = os.path.abspath(getattr(args, "path", "."))
     entries_arg = getattr(args, "entry", None)
@@ -190,16 +286,9 @@ def upload_command(args: argparse.Namespace) -> int:
             qualname, resolved_path = _resolve_entry_to_qual_and_source(e, root)
             selected_specs.append((qualname, resolved_path))
     else:
-        selected_tests = _discover_and_select_tests(root, non_interactive=non_interactive)
+        selected_tests: list[DiscoveredTest] | None = _discover_and_select_tests(root, non_interactive=non_interactive)
         if not selected_tests:
             return 1
-        # Warn about parameterized tests
-        parameterized_tests = [t for t in selected_tests if t.has_parametrize]
-        if parameterized_tests:
-            print("\nNote: Parameterized tests will be uploaded as a single evaluator that")
-            print("      handles all parameter combinations. The evaluator will work with")
-            print("      the same logic regardless of which model/parameters are used.")
-
         selected_specs = [(t.qualname, t.file_path) for t in selected_tests]
 
     base_id = getattr(args, "id", None)
@@ -228,24 +317,34 @@ def upload_command(args: argparse.Namespace) -> int:
             secrets_from_file["FIREWORKS_API_KEY"] = fw_api_key_value
 
         if fw_account_id and secrets_from_file:
-            print(f"Found {len(secrets_from_file)} API keys to upload as Fireworks secrets...")
             if secrets_from_env_file and os.path.exists(env_file_path):
                 print(f"Loading secrets from: {env_file_path}")
 
-            for secret_name, secret_value in secrets_from_file.items():
-                source = ".env" if secret_name in secrets_from_env_file else "environment"
-                print(
-                    f"Ensuring {secret_name} is registered as a secret on Fireworks for rollout... "
-                    f"({source}: {_mask_secret_value(secret_value)})"
-                )
-                if create_or_update_fireworks_secret(
-                    account_id=fw_account_id,
-                    key_name=secret_name,
-                    secret_value=secret_value,
-                ):
-                    print(f"✓ {secret_name} secret created/updated on Fireworks.")
-                else:
-                    print(f"Warning: Failed to create/update {secret_name} secret on Fireworks.")
+            # Prompt user to select which secrets to upload
+            selected_secrets = _prompt_select_secrets(
+                secrets_from_file,
+                secrets_from_env_file,
+                non_interactive,
+            )
+
+            if selected_secrets:
+                print(f"\nUploading {len(selected_secrets)} selected secret(s) to Fireworks...")
+                for secret_name, secret_value in selected_secrets.items():
+                    source = ".env" if secret_name in secrets_from_env_file else "environment"
+                    print(
+                        f"Ensuring {secret_name} is registered as a secret on Fireworks for rollout... "
+                        f"({source}: {_mask_secret_value(secret_value)})"
+                    )
+                    if create_or_update_fireworks_secret(
+                        account_id=fw_account_id,
+                        key_name=secret_name,
+                        secret_value=secret_value,
+                    ):
+                        print(f"✓ {secret_name} secret created/updated on Fireworks.")
+                    else:
+                        print(f"Warning: Failed to create/update {secret_name} secret on Fireworks.")
+            else:
+                print("No secrets selected for upload.")
         else:
             if not fw_account_id:
                 print(
@@ -284,11 +383,8 @@ def upload_command(args: argparse.Namespace) -> int:
 
         print(f"\nUploading evaluator '{evaluator_id}' for {qualname.split('.')[-1]}...")
         try:
-            test_dir = root
-            metric_name = os.path.basename(test_dir) or "metric"
             result = create_evaluation(
                 evaluator_id=evaluator_id,
-                metric_folders=[f"{metric_name}={test_dir}"],
                 display_name=display_name or evaluator_id,
                 description=description or f"Evaluator for {qualname}",
                 force=force,
