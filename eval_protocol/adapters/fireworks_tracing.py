@@ -264,6 +264,7 @@ class FireworksTracingAdapter(BaseAdapter):
         self.project_id = project_id
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
+        self._session = requests.Session()
 
     def search_logs(self, tags: List[str], limit: int = 100, hours_back: int = 24) -> List[Dict[str, Any]]:
         """Fetch logs from Fireworks tracing gateway /logs endpoint.
@@ -287,14 +288,14 @@ class FireworksTracingAdapter(BaseAdapter):
         last_error: Optional[str] = None
         for url in urls_to_try:
             try:
-                response = requests.get(url, params=params, timeout=self.timeout, headers=headers)
-                if response.status_code == 404:
-                    # Try next variant
-                    last_error = f"404 for {url}"
-                    continue
-                response.raise_for_status()
-                data = response.json() or {}
-                break
+                with self._session.get(url, params=params, timeout=self.timeout, headers=headers) as response:
+                    if response.status_code == 404:
+                        # Try next variant (must close response to release connection)
+                        last_error = f"404 for {url}"
+                        continue
+                    response.raise_for_status()
+                    data = response.json() or {}
+                    break
             except requests.exceptions.RequestException as e:
                 last_error = str(e)
                 continue
@@ -412,22 +413,20 @@ class FireworksTracingAdapter(BaseAdapter):
 
         result = None
         try:
-            response = requests.get(url, params=params, timeout=self.timeout, headers=headers)
-            response.raise_for_status()
-            result = response.json()
-        except requests.exceptions.HTTPError as e:
-            error_msg = str(e)
-
-            # Try to extract detail message from response
-            if e.response is not None:
-                try:
-                    error_detail = e.response.json().get("detail", {})
-                    error_msg = error_detail or e.response.text
-                except Exception:  # In case e.response.json() fails
-                    error_msg = f"Proxy error: {e.response.text}"
-
-            logger.error("Failed to fetch traces from proxy (HTTP %s): %s", e.response.status_code, error_msg)
-            return eval_rows
+            with self._session.get(url, params=params, timeout=self.timeout, headers=headers) as response:
+                if response.status_code >= 400:
+                    error_msg: str = response.text
+                    try:
+                        payload = response.json()
+                        if isinstance(payload, dict) and "detail" in payload:
+                            detail = payload.get("detail")
+                            if detail:
+                                error_msg = str(detail)
+                    except Exception:
+                        pass
+                    logger.error("Failed to fetch traces from proxy (HTTP %s): %s", response.status_code, error_msg)
+                    return eval_rows
+                result = response.json()
         except requests.exceptions.RequestException as e:
             # Non-HTTP errors (network issues, timeouts, etc.)
             logger.error("Failed to fetch traces from proxy: %s", str(e))
@@ -451,3 +450,10 @@ class FireworksTracingAdapter(BaseAdapter):
 
         logger.info("Successfully converted %d traces to evaluation rows", len(eval_rows))
         return eval_rows
+
+    def close(self) -> None:
+        """Close underlying HTTP resources."""
+        try:
+            self._session.close()
+        except Exception:
+            pass
