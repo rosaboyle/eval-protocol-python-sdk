@@ -1,3 +1,6 @@
+from types import ModuleType
+
+
 import os
 import ast
 import sys
@@ -6,21 +9,44 @@ import inspect
 import argparse
 import typing
 import types
+import importlib.util
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, List, Optional, is_typeddict
+from typing import Any, List, Optional
 import typing_extensions
 import inspect
 from collections.abc import Callable
 import pytest
 
 from ..auth import (
-    get_fireworks_account_id,
     get_fireworks_api_base,
     get_fireworks_api_key,
     verify_api_key_and_get_account_id,
 )
 from ..fireworks_rft import _map_api_host_to_app_host
+
+
+def load_module_from_file_path(source_file_path: str) -> ModuleType:
+    """Load a Python module from an absolute/relative filesystem path.
+
+    This mirrors the CLI behavior used by `upload.py` and `create_rft.py`:
+    - module name is derived from the file stem (e.g. /a/b/foo.py -> foo)
+    - the module is inserted into sys.modules under that name before exec
+    """
+    abs_path = os.path.abspath(source_file_path)
+    if not os.path.isfile(abs_path):
+        raise ValueError(f"File not found: {abs_path}")
+    if not abs_path.endswith(".py"):
+        raise ValueError(f"Expected a .py file path, got: {abs_path}")
+
+    module_name = Path(abs_path).stem
+    spec = importlib.util.spec_from_file_location(module_name, abs_path)
+    if not spec or not spec.loader:
+        raise ValueError(f"Unable to load module from path: {abs_path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)  # type: ignore[attr-defined]
+    return module
 
 
 def _get_questionary_style():
@@ -252,7 +278,7 @@ def _format_test_choice(test: DiscoveredTest, idx: int) -> str:
 
 
 def _prompt_select_interactive(tests: list[DiscoveredTest]) -> list[DiscoveredTest]:
-    """Interactive selection with arrow keys using questionary."""
+    """Interactive single selection with arrow keys using questionary (Enter selects highlighted)."""
     try:
         import questionary
 
@@ -263,35 +289,32 @@ def _prompt_select_interactive(tests: list[DiscoveredTest]) -> list[DiscoveredTe
             print(f"\nFound 1 test: {_format_test_choice(tests[0], 1)}")
             confirm = questionary.confirm("Select this test?", default=True, style=custom_style).ask()
             if confirm:
-                return tests
+                return [tests[0]]
             else:
                 return []
 
-        # Build checkbox choices
+        # Build single-select choices
         choices = []
         for idx, t in enumerate(tests, 1):
             choice_text = _format_test_choice(t, idx)
-            choices.append(questionary.Choice(title=choice_text, value=idx - 1, checked=False))
+            choices.append(questionary.Choice(title=choice_text, value=idx - 1))
 
         print()
-        selected_indices = questionary.checkbox(
-            "Select evaluation tests to upload:",
+        selected_index = questionary.select(
+            "Select an evaluation test:",
             choices=choices,
             style=custom_style,
             pointer=">",
-            instruction="(↑↓ move, space select, enter confirm)",
+            instruction="(↑↓ move, enter confirm)",
         ).ask()
 
-        if selected_indices is None:  # Ctrl+C
+        if selected_index is None:  # Ctrl+C / Esc
             print("\nUpload cancelled.")
             return []
 
-        if not selected_indices:
-            return []
-
-        selected_tests = [tests[i] for i in selected_indices]
-        print(f"\n✓ Selected {len(selected_tests)} test(s)")
-        return selected_tests
+        chosen = tests[int(selected_index)]
+        print("\n✓ Selected 1 test")
+        return [chosen]
 
     except ImportError:
         # Fallback to simpler implementation
@@ -346,9 +369,10 @@ def _prompt_select_fallback(tests: list[DiscoveredTest]) -> list[DiscoveredTest]
 
 
 def _prompt_select(tests: list[DiscoveredTest], non_interactive: bool) -> list[DiscoveredTest]:
-    """Prompt user to select tests to upload."""
+    """Prompt user to select exactly one test."""
     if non_interactive:
-        return tests
+        # In non-interactive mode, only proceed if unambiguous.
+        return [tests[0]] if len(tests) == 1 else []
 
     return _prompt_select_interactive(tests)
 
@@ -375,7 +399,16 @@ def _discover_and_select_tests(project_root: str, non_interactive: bool) -> Opti
         return None
 
     if not selected_tests:
-        print("No tests selected.")
+        if non_interactive and len(tests) > 1:
+            print("Error: Multiple evaluation tests found in --yes (non-interactive) mode.")
+            print("       Please pass --evaluator or --entry to disambiguate.")
+        else:
+            print("No test selected.")
+        return None
+
+    # Enforce single-select at the helper level.
+    if len(selected_tests) != 1:
+        print("Error: Please select exactly one evaluation test.")
         return None
 
     return selected_tests
