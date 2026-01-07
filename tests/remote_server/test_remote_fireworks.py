@@ -1,6 +1,5 @@
 # AUTO SERVER STARTUP: Server is automatically started and stopped by the test
 
-import os
 import subprocess
 import socket
 import time
@@ -13,11 +12,33 @@ from eval_protocol.data_loader.dynamic_data_loader import DynamicDataLoader
 from eval_protocol.models import EvaluationRow, Message, EvaluateResult
 from eval_protocol.pytest import evaluation_test
 from eval_protocol.pytest.remote_rollout_processor import RemoteRolloutProcessor
-from eval_protocol.adapters.fireworks_tracing import FireworksTracingAdapter
-from eval_protocol.utils.evaluation_row_utils import filter_longest_conversation
+import eval_protocol.pytest.remote_rollout_processor as remote_rollout_processor_module
 from eval_protocol.types.remote_rollout_processor import DataLoaderConfig
 
+
 ROLLOUT_IDS = set()
+
+
+@pytest.fixture(autouse=True)
+def check_rollout_coverage(monkeypatch):
+    """
+    Ensure we attempted to fetch remote traces for each rollout.
+
+    This wraps the built-in default_fireworks_output_data_loader (without making it configurable)
+    and tracks rollout_ids passed through its DataLoaderConfig.
+    """
+    global ROLLOUT_IDS
+    ROLLOUT_IDS.clear()
+
+    original_loader = remote_rollout_processor_module.default_fireworks_output_data_loader
+
+    def wrapped_loader(config: DataLoaderConfig) -> DynamicDataLoader:
+        ROLLOUT_IDS.add(config.rollout_id)
+        return original_loader(config)
+
+    monkeypatch.setattr(remote_rollout_processor_module, "default_fireworks_output_data_loader", wrapped_loader)
+    yield
+    assert len(ROLLOUT_IDS) == 3, f"Expected to see 3 rollout_ids, but only saw {ROLLOUT_IDS}"
 
 
 def find_available_port() -> int:
@@ -68,31 +89,6 @@ def setup_remote_server():
     process.wait()
 
 
-@pytest.fixture(autouse=True)
-def check_rollout_coverage():
-    """Ensure we processed all expected rollout_ids"""
-    global ROLLOUT_IDS
-    ROLLOUT_IDS.clear()
-    yield
-
-    assert len(ROLLOUT_IDS) == 3, f"Expected to see 3 rollout_ids, but only saw {ROLLOUT_IDS}"
-
-
-def fetch_fireworks_traces(config: DataLoaderConfig) -> List[EvaluationRow]:
-    global ROLLOUT_IDS  # Track all rollout_ids we've seen
-    ROLLOUT_IDS.add(config.rollout_id)
-
-    base_url = config.model_base_url or "https://tracing.fireworks.ai"
-    adapter = FireworksTracingAdapter(base_url=base_url)
-    return adapter.get_evaluation_rows(tags=[f"rollout_id:{config.rollout_id}"], max_retries=7)
-
-
-def fireworks_output_data_loader(config: DataLoaderConfig) -> DynamicDataLoader:
-    return DynamicDataLoader(
-        generators=[lambda: fetch_fireworks_traces(config)], preprocess_fn=filter_longest_conversation
-    )
-
-
 def rows() -> List[EvaluationRow]:
     """Generate local rows with rich input_metadata to verify it survives remote traces."""
     base_dataset_info = {
@@ -118,7 +114,6 @@ def rows() -> List[EvaluationRow]:
     rollout_processor=RemoteRolloutProcessor(
         remote_base_url=f"http://127.0.0.1:{SERVER_PORT}",
         timeout_seconds=180,
-        output_data_loader=fireworks_output_data_loader,
     ),
 )
 async def test_remote_rollout_and_fetch_fireworks(row: EvaluationRow) -> EvaluationRow:
@@ -133,9 +128,6 @@ async def test_remote_rollout_and_fetch_fireworks(row: EvaluationRow) -> Evaluat
     assert row.messages[0].content == "What is the capital of France?", "Row should have correct message content"
     assert len(row.messages) > 1, "Row should have a response. If this fails, we fellback to the original row."
 
-    assert row.execution_metadata.rollout_id in ROLLOUT_IDS, (
-        f"Row rollout_id {row.execution_metadata.rollout_id} should be in tracked rollout_ids: {ROLLOUT_IDS}"
-    )
     assert row.input_metadata.completion_params["model"] == "fireworks_ai/accounts/fireworks/models/gpt-oss-120b"
     assert row.input_metadata.completion_params["temperature"] == 0.5, "Row should have temperature at top level"
 

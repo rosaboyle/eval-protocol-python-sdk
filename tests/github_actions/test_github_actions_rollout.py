@@ -12,36 +12,33 @@ from eval_protocol.data_loader.dynamic_data_loader import DynamicDataLoader
 from eval_protocol.models import EvaluationRow, InputMetadata
 from eval_protocol.pytest import evaluation_test
 from eval_protocol.pytest.github_action_rollout_processor import GithubActionRolloutProcessor
+import eval_protocol.pytest.github_action_rollout_processor as github_action_rollout_processor_module
 from eval_protocol.types.remote_rollout_processor import DataLoaderConfig
-from eval_protocol.adapters.fireworks_tracing import FireworksTracingAdapter
-from eval_protocol.utils.evaluation_row_utils import filter_longest_conversation
+
 
 ROLLOUT_IDS = set()
 
 
 @pytest.fixture(autouse=True)
-def check_rollout_coverage():
-    """Ensure we processed all expected rollout_ids"""
+def check_rollout_coverage(monkeypatch):
+    """
+    Ensure we attempted to fetch remote traces for each rollout.
+
+    This wraps the built-in default_fireworks_output_data_loader (without making it configurable)
+    and tracks rollout_ids passed through its DataLoaderConfig.
+    """
     global ROLLOUT_IDS
     ROLLOUT_IDS.clear()
+
+    original_loader = github_action_rollout_processor_module.default_fireworks_output_data_loader
+
+    def wrapped_loader(config: DataLoaderConfig) -> DynamicDataLoader:
+        ROLLOUT_IDS.add(config.rollout_id)
+        return original_loader(config)
+
+    monkeypatch.setattr(github_action_rollout_processor_module, "default_fireworks_output_data_loader", wrapped_loader)
     yield
-
     assert len(ROLLOUT_IDS) == 3, f"Expected to see 3 rollout_ids, but only saw {ROLLOUT_IDS}"
-
-
-def fetch_fireworks_traces(config: DataLoaderConfig) -> List[EvaluationRow]:
-    global ROLLOUT_IDS  # Track all rollout_ids we've seen
-    ROLLOUT_IDS.add(config.rollout_id)
-
-    base_url = config.model_base_url or "https://tracing.fireworks.ai"
-    adapter = FireworksTracingAdapter(base_url=base_url)
-    return adapter.get_evaluation_rows(tags=[f"rollout_id:{config.rollout_id}"], max_retries=5)
-
-
-def fireworks_output_data_loader(config: DataLoaderConfig) -> DynamicDataLoader:
-    return DynamicDataLoader(
-        generators=[lambda: fetch_fireworks_traces(config)], preprocess_fn=filter_longest_conversation
-    )
 
 
 def rows() -> List[EvaluationRow]:
@@ -68,14 +65,11 @@ def rows() -> List[EvaluationRow]:
         ref=os.getenv("GITHUB_REF", "main"),
         poll_interval=3.0,  # For multi-turn, you'll likely want higher poll interval
         timeout_seconds=300,
-        output_data_loader=fireworks_output_data_loader,
     ),
 )
 async def test_github_actions_rollout(row: EvaluationRow) -> EvaluationRow:
     """Test GitHub Actions rollout with worker-controlled dataset."""
-    # Track rollout IDs for coverage check
-    global ROLLOUT_IDS
-    ROLLOUT_IDS.add(row.execution_metadata.rollout_id)
+    assert row.execution_metadata.rollout_id is not None
 
     # This dataset is built into github_actions/rollout_worker.py
     if row.messages[0].content == "What is the capital of France?":

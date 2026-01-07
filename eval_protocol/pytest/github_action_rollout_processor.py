@@ -1,13 +1,12 @@
 import asyncio
 import os
 import time
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 import json
 import requests
 from datetime import datetime, timezone, timedelta
 from eval_protocol.models import EvaluationRow, Status
 from eval_protocol.data_loader.dynamic_data_loader import DynamicDataLoader
-from eval_protocol.types.remote_rollout_processor import DataLoaderConfig
 
 from .rollout_processor import RolloutProcessor
 from .types import RolloutProcessorConfig
@@ -21,7 +20,7 @@ class GithubActionRolloutProcessor(RolloutProcessor):
     Expected GitHub Actions workflow:
     - Workflow dispatch with inputs: completion_params, metadata (JSON), model_base_url, api_key
     - Workflow makes API calls that get traced (e.g., via Fireworks tracing proxy)
-    - Traces are fetched later via output_data_loader using rollout_id tags
+    - Traces are fetched later via Fireworks tracing proxy using rollout_id tags
 
     NOTE: GHA has a rate limit of 5000 requests per hour.
     """
@@ -38,7 +37,6 @@ class GithubActionRolloutProcessor(RolloutProcessor):
         timeout_seconds: float = 1800.0,
         max_find_workflow_retries: int = 5,
         github_token: Optional[str] = None,
-        output_data_loader: Optional[Callable[[DataLoaderConfig], DynamicDataLoader]] = None,
     ):
         self.owner = owner
         self.repo = repo
@@ -52,7 +50,6 @@ class GithubActionRolloutProcessor(RolloutProcessor):
         self.timeout_seconds = timeout_seconds
         self.max_find_workflow_retries = max_find_workflow_retries
         self.github_token = github_token
-        self._output_data_loader = output_data_loader or default_fireworks_output_data_loader
 
     def _headers(self) -> Dict[str, str]:
         headers = {"Accept": "application/vnd.github+json"}
@@ -200,7 +197,7 @@ class GithubActionRolloutProcessor(RolloutProcessor):
             row.execution_metadata.rollout_duration_seconds = time.perf_counter() - start_time
 
             def _update_with_trace() -> None:
-                return update_row_with_remote_trace(row, self._output_data_loader, self.model_base_url)
+                return update_row_with_remote_trace(row, default_fireworks_output_data_loader, self.model_base_url)
 
             await asyncio.to_thread(_update_with_trace)
 
