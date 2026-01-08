@@ -20,13 +20,12 @@ from eval_protocol.models import (
     EvaluationRow,
     EvaluationThreshold,
     EvaluationThresholdDict,
-    EvaluateResult,
     Status,
     EPParameters,
 )
 from eval_protocol.pytest.dual_mode_wrapper import create_dual_mode_wrapper
 from eval_protocol.pytest.evaluation_test_postprocess import postprocess
-from eval_protocol.pytest.execution import execute_pytest, execute_pytest_with_exception_handling
+from eval_protocol.pytest.execution import execute_pytest_with_exception_handling
 from eval_protocol.pytest.priority_scheduler import execute_priority_rollouts
 from eval_protocol.pytest.generate_parameter_combinations import (
     ParameterizedTestKwargs,
@@ -56,6 +55,7 @@ from eval_protocol.pytest.evaluation_test_utils import (
     AggregationMethod,
     add_cost_metrics,
     log_eval_status_and_rows,
+    normalize_fireworks_model,
     parse_ep_completion_params,
     parse_ep_completion_params_overwrite,
     parse_ep_max_concurrent_rollouts,
@@ -205,6 +205,7 @@ def evaluation_test(
     max_dataset_rows = parse_ep_max_rows(max_dataset_rows)
     completion_params = parse_ep_completion_params(completion_params)
     completion_params = parse_ep_completion_params_overwrite(completion_params)
+    completion_params = [normalize_fireworks_model(cp) for cp in completion_params]
     original_completion_params = completion_params
     passed_threshold = parse_ep_passed_threshold(passed_threshold)
     data_loaders = parse_ep_dataloaders(data_loaders)
@@ -365,6 +366,7 @@ def evaluation_test(
                             row.input_metadata.row_id = generate_id(seed=0, index=index)
 
                     completion_params = kwargs["completion_params"] if "completion_params" in kwargs else None
+                    completion_params = normalize_fireworks_model(completion_params)
                     # Create eval metadata with test function info and current commit hash
                     eval_metadata = EvalMetadata(
                         name=test_func.__name__,
