@@ -103,7 +103,7 @@ def pytest_addoption(parser) -> None:
         "--ep-success-threshold",
         action="store",
         default=None,
-        help=("Override the success threshold for evaluation_test. Pass a float between 0.0 and 1.0 (e.g., 0.8)."),
+        help=("Override the success threshold for evaluation_test. Pass any float (e.g., 0.8 or -1e9 to disable)."),
     )
     group.addoption(
         "--ep-se-threshold",

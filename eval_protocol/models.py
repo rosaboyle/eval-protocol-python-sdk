@@ -746,9 +746,7 @@ class EvaluationThreshold(BaseModel):
     The standard_error field is optional - if provided, tests must also meet the maximum standard error requirement.
     """
 
-    success: float = Field(
-        ..., description="Minimum success rate threshold (fraction of total score, 0.0 to 1.0)", ge=0.0, le=1.0
-    )
+    success: float = Field(..., description="Minimum success rate threshold (fraction of total score)")
     standard_error: float | None = Field(
         default=None,
         description="Maximum standard error threshold (fraction of total score, 0.0 to 1.0)",
