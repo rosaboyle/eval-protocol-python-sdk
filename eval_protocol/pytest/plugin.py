@@ -183,16 +183,12 @@ def _normalize_number(val: Optional[str]) -> Optional[str]:
 
 
 def _normalize_success_threshold(val: Optional[str]) -> Optional[float]:
-    """Normalize success threshold value as float between 0.0 and 1.0."""
+    """Normalize success threshold value as float."""
     if val is None:
         return None
 
     try:
-        threshold_float = float(val.strip())
-        if 0.0 <= threshold_float <= 1.0:
-            return threshold_float
-        else:
-            return None  # threshold must be between 0 and 1
+        return float(val.strip())
     except ValueError:
         return None
 
