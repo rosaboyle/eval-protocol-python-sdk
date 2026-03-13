@@ -104,6 +104,9 @@ class RemoteRolloutProcessor(RolloutProcessor):
             try:
                 session = self._get_or_create_session()
                 async with session.post(init_url, json=init_payload.model_dump(), timeout=timeout_init) as resp:
+                    if resp.status >= 500:
+                        body = await resp.text()
+                        raise ConnectionError(f"Remote /init returned server error (HTTP {resp.status}): {body}")
                     if resp.status >= 400:
                         body = await resp.text()
                         raise RuntimeError(f"Remote /init failed (HTTP {resp.status}): {body}")
@@ -215,8 +218,6 @@ class RemoteRolloutProcessor(RolloutProcessor):
                 loop = asyncio.get_running_loop()
                 loop.create_task(self._session.close())
             except RuntimeError:
-                # No running event loop - can't safely close the session.
-                # The session will be garbage collected eventually, but warn about it.
                 logger.warning(
                     "RemoteRolloutProcessor.cleanup() called outside of async context. "
                     "Session may not be properly closed. Use `await processor.acleanup()` when possible."
