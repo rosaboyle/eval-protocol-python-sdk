@@ -94,7 +94,8 @@ TEXTARENA_INLINE_DATA: List[Dict[str, Any]] = [
             "temperature": 0.7,
             "max_tokens": 32,
             # Any working model with your API key
-            "model": "fireworks_ai/accounts/fireworks/models/kimi-k2-instruct-0905",
+            "model": "fireworks_ai/accounts/fireworks/models/kimi-k2p5",
+            "reasoning_effort": "none",
         }
     ],
     num_runs=1,
