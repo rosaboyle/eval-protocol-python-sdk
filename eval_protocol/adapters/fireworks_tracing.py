@@ -375,6 +375,37 @@ class FireworksTracingAdapter(BaseAdapter):
             )
         return results
 
+    async def async_get_status(self, session: aiohttp.ClientSession, rollout_id: str) -> Optional[Dict[str, Any]]:
+        """Fetch rollout status from the lightweight /status endpoint.
+
+        Returns the parsed JSON response or None if the status is not yet available.
+        Response shape: {"rollout_id": "...", "status": {"code": ...} | null, "extras": {...} | null}
+        """
+        headers = {
+            "Authorization": f"Bearer {self._get_api_key()}",
+            "User-Agent": get_user_agent(),
+        }
+        params: Dict[str, Any] = {"rollout_id": rollout_id}
+        timeout = aiohttp.ClientTimeout(total=self.timeout)
+
+        urls_to_try = [f"{self.base_url}/v1/status", f"{self.base_url}/status"]
+        last_error: Optional[str] = None
+        for url in urls_to_try:
+            try:
+                async with session.get(url, params=params, headers=headers, timeout=timeout) as resp:
+                    if resp.status == 404:
+                        last_error = f"404 for {url}"
+                        continue
+                    resp.raise_for_status()
+                    return (await resp.json(content_type=None)) or {}
+            except (aiohttp.ClientError, asyncio.TimeoutError, json.JSONDecodeError) as e:
+                last_error = str(e)
+                continue
+
+        if last_error:
+            logger.error("Failed to fetch status from Fireworks (tried %s): %s", urls_to_try, last_error)
+        return None
+
     def get_evaluation_rows(
         self,
         tags: List[str],
