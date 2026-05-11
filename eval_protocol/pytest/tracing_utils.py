@@ -22,7 +22,11 @@ def default_fireworks_output_data_loader(config: DataLoaderConfig) -> DynamicDat
         # Use EP_REMOTE_API_KEY for fetching remote traces, falling back to FIREWORKS_API_KEY
         api_key = os.environ.get("EP_REMOTE_API_KEY") or os.environ.get("FIREWORKS_API_KEY")
         adapter = FireworksTracingAdapter(base_url=base_url, api_key=api_key)
-        return adapter.get_evaluation_rows(tags=[f"rollout_id:{config.rollout_id}"], max_retries=5)
+        return adapter.get_evaluation_rows(
+            tags=[f"rollout_id:{config.rollout_id}"],
+            max_retries=5,
+            include_payloads=config.include_payloads,
+        )
 
     return DynamicDataLoader(generators=[fetch_traces], preprocess_fn=filter_longest_conversation)
 
@@ -129,7 +133,7 @@ def build_init_request(
 
     # Build final model base URL with tracing metadata
     final_model_base_url = model_base_url
-    if model_base_url and ("tracing.fireworks.ai" in model_base_url or model_base_url.startswith("http://localhost")):
+    if model_base_url and ("tracing.fireworks.ai" in model_base_url or model_base_url.startswith("http://localhost") or "litellm-gateway" in model_base_url):
         final_model_base_url = build_fireworks_tracing_url(model_base_url, meta, completion_params_base_url)
 
     # Extract API key from environment or completion_params
@@ -148,13 +152,20 @@ def build_init_request(
 
 
 def update_row_with_remote_trace(
-    row: EvaluationRow, output_data_loader: Callable[[DataLoaderConfig], DynamicDataLoader], model_base_url: str
+    row: EvaluationRow,
+    output_data_loader: Callable[[DataLoaderConfig], DynamicDataLoader],
+    model_base_url: str,
+    include_payloads: bool = False,
 ) -> None:
     """Update row with remote trace data using output_data_loader (shared logic)."""
     if not row.execution_metadata.rollout_id:
         return None
 
-    loader_config = DataLoaderConfig(rollout_id=row.execution_metadata.rollout_id, model_base_url=model_base_url)
+    loader_config = DataLoaderConfig(
+        rollout_id=row.execution_metadata.rollout_id,
+        model_base_url=model_base_url,
+        include_payloads=include_payloads,
+    )
     data_loader = output_data_loader(loader_config)
     results = data_loader.load()
     output_rows: List[EvaluationRow] = [r for result in results for r in result.rows]
