@@ -103,7 +103,7 @@ def build_init_request(
     if not completion_params_dict.get("model"):
         raise ValueError("Model must be provided in completion_params")
 
-    # Extract base_url from completion_params
+    # Extract base_url from completion_params for tracing-gateway URL encoding
     completion_params_base_url: Optional[str] = completion_params_dict.get("base_url")
 
     # Strip non-OpenAI fields from messages
